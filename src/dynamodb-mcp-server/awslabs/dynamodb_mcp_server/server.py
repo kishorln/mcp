@@ -208,6 +208,43 @@ async def dynamodb_data_modeling() -> str:
 
 @app.tool()
 @handle_exceptions
+async def mysql_database_analysis() -> str:
+    """Analyzes existing MySQL database to extract access patterns and generate requirements for DynamoDB migration.
+    
+    This tool performs comprehensive MySQL database analysis including:
+    - Progressive query pattern analysis (24h → 7d → 30d → 365d → all users)
+    - Cross-database query detection with user consent
+    - Schema structure analysis
+    - Traffic pattern and RPS calculation
+    - Migration complexity assessment
+    
+    The tool follows strict analysis rules:
+    - Step 0: Mandatory database identification
+    - Steps 1-6: Progressive query analysis with ≥10 pattern stop condition
+    - Database filtering: Only analyze configured database unless cross-db consent given
+    - Pattern validation: Exclude system/analysis queries from meaningful count
+    
+    Outputs a comprehensive mysql_requirements.md file that can be used with the
+    dynamodb_data_modeling tool for complete migration planning.
+    
+    Returns: Complete MySQL analysis workflow prompt
+    """
+    prompt_file = Path(__file__).parent / 'prompts' / 'mysql_db_analyzer_perf_schema.md'
+    mysql_prompt = prompt_file.read_text(encoding='utf-8')
+    
+    integration_status = """🔍 MySQL Database Analysis for DynamoDB Migration
+
+I'll start by executing TEMPLATE 1 to identify the configured database. If MySQL tools aren't available, I'll provide configuration instructions.
+
+"""
+    
+    return f"""{integration_status}
+
+{mysql_prompt}"""
+
+
+@app.tool()
+@handle_exceptions
 @mutation_check
 async def put_resource_policy(
     resource_arn: str = resource_arn,
