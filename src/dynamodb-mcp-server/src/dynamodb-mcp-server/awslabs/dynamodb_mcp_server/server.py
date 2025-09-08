@@ -17,6 +17,9 @@
 import boto3
 import json
 import os
+from pathlib import Path
+from typing import Optional
+from awslabs.dynamodb_mcp_server.mysql_log_analyzer import parse_mysql_log_file, analyze_query_patterns
 from awslabs.dynamodb_mcp_server.common import (
     AttributeDefinition,
     AttributeValue,
@@ -204,6 +207,204 @@ async def dynamodb_data_modeling() -> str:
     prompt_file = Path(__file__).parent / 'prompts' / 'dynamodb_architect.md'
     architect_prompt = prompt_file.read_text(encoding='utf-8')
     return architect_prompt
+
+
+@app.tool()
+@handle_exceptions
+async def mysql_database_analysis(
+    analysis_type: str = Field(
+        default="",
+        description="Type of analysis: 'performance_schema' for live database analysis or 'log_file' for offline log analysis. MUST be empty on first call to show options to user."
+    ),
+    log_file_path: Optional[str] = Field(
+        default=None,
+        description="Path to MySQL general log file (required when analysis_type='log_file')"
+    )
+) -> str:
+    """Analyzes existing MySQL database to extract access patterns and generate requirements for DynamoDB migration.
+    
+    IMPORTANT: Call this tool WITHOUT parameters first to show analysis options to the user.
+    CRITICAL: This tool has built-in log file parsing. DO NOT manually read log files with fs_read.
+    CRITICAL: For log_file analysis, ONLY use this tool - it will automatically parse and analyze the log.
+    
+    WORKFLOW:
+    1. First call: mysql_database_analysis() - shows options to user
+    2. Second call: mysql_database_analysis(analysis_type="user_choice", ...)
+    
+    This tool performs comprehensive MySQL database analysis including:
+    - Progressive query pattern analysis (Performance Schema or Log Files)
+    - Schema structure analysis
+    - Traffic pattern and RPS calculation
+    - Migration complexity assessment
+    
+    Two analysis modes (USER MUST CHOOSE):
+    1. performance_schema: Live database analysis using Performance Schema
+    2. log_file: Offline analysis from MySQL general log files (requires log_file_path)
+    
+    Args:
+        analysis_type: REQUIRED - Must be 'performance_schema' or 'log_file' (ask user to choose)
+        log_file_path: Path to log file (required for log_file analysis)
+    
+    Returns: Complete MySQL analysis workflow prompt
+    """
+    
+    # Show options if no analysis_type provided
+    if not analysis_type or analysis_type == "":
+        return """MySQL Database Analysis Options
+
+Please choose your analysis method:
+
+1. **performance_schema** - Analyze live MySQL database using Performance Schema
+2. **log_file** - Analyze historical MySQL general log files offline
+
+Usage:
+- For live database: mysql_database_analysis(analysis_type="performance_schema")
+- For log files: mysql_database_analysis(analysis_type="log_file", log_file_path="~/path/to/mysql.log")
+
+Which analysis method would you like to use?
+"""
+    
+    if analysis_type not in ["performance_schema", "log_file"]:
+        return "Error: Invalid analysis_type '{}'. Must be either 'performance_schema' or 'log_file'".format(analysis_type)
+    
+    if analysis_type == "log_file":
+        if not log_file_path:
+            return """Log File Path Required
+
+You selected log file analysis. Please provide the path to your MySQL general log file.
+
+**Common log file locations:**
+- `~/mysql/logs/mysql.log`
+- `/var/log/mysql/mysql.log` 
+- `/usr/local/mysql/data/mysql.log`
+
+**Usage:**
+mysql_database_analysis(analysis_type="log_file", log_file_path="your_actual_path_here")
+
+What's the path to your MySQL log file?
+"""
+        
+        # Actually parse and analyze the log file here
+        try:
+            import os
+            expanded_path = os.path.expanduser(log_file_path)
+            
+            if not os.path.exists(expanded_path):
+                return f"Error: Log file not found: {expanded_path}"
+            
+            # Parse and analyze log file
+            queries = parse_mysql_log_file(expanded_path)
+            patterns = analyze_query_patterns(queries)
+            
+            if not queries:
+                return f"""Could not parse log file: {expanded_path}
+
+**Supported MySQL log formats:**
+
+**1. Standard General Log (4 columns):**
+- Timestamp, Connection ID, Command, SQL Query
+- Delimiters: Tab, comma, or space-separated
+
+**2. CSV Extract from mysql.general_log table:**
+- Must include headers with required columns: EVENT_TIME (or TIMESTAMP), ARGUMENT (or QUERY), COMMAND_TYPE (or COMMAND)
+- Optional: CONNECTION_ID, THREAD_ID, USER_HOST, etc.
+- **Extra columns are fine** - only required columns are used, others are ignored
+
+**Example formats:**
+```
+# Standard format
+2025-07-31T18:20:34.409579Z	34	Query	SELECT * FROM products
+
+# CSV format (extra columns ignored)
+EVENT_TIME,USER_HOST,THREAD_ID,SERVER_ID,COMMAND_TYPE,ARGUMENT,DATABASE
+"2025-07-31 18:20:34","user@host",34,1,"Query","SELECT * FROM products","mydb"
+```
+
+**Required CSV columns (case insensitive):**
+- Timestamp: EVENT_TIME, TIMESTAMP, or TIME
+- Query: ARGUMENT, QUERY, or SQL_TEXT  
+- Command: COMMAND_TYPE or COMMAND (optional, defaults to 'Query')
+- Connection: CONNECTION_ID or THREAD_ID (optional, defaults to '0')
+
+Please ensure your log file includes the required columns.
+"""
+            
+            # Calculate time span
+            timestamps = [q['timestamp'] for q in queries]
+            time_span = max(timestamps) - min(timestamps)
+            analysis_days = max(1, time_span.days + 1)
+            
+            # Format results
+            result = f"""# MySQL Log File Analysis Complete ✅
+
+**Log file**: {expanded_path}
+**Analysis period**: {analysis_days} days (auto-calculated)
+**Total queries**: {len(queries)}
+**Unique patterns**: {len(patterns)}
+
+## Top Query Patterns for DynamoDB Migration
+
+"""
+            
+            for i, pattern in enumerate(patterns[:10], 1):
+                result += f"""### {i}. {pattern['complexity_type']} (RPS: {pattern['calculated_rps']})
+```sql
+{pattern['sample_query']}
+```
+- **Frequency**: {pattern['frequency']} queries
+- **Index Usage**: {pattern['index_usage_hint']}
+
+"""
+            
+            # Get workflow prompt for schema analysis
+            prompt_file = Path(__file__).parent / 'prompts' / 'mysql_db_analyzer_perf_schema.md'
+            mysql_prompt = prompt_file.read_text(encoding='utf-8')
+            
+            result += f"""
+## Next Steps: Schema Analysis with Mismatch Check
+
+The log analysis is complete with {analysis_days} days of data auto-calculated.
+
+**SKIP THESE STEPS (already completed by log analysis):**
+- Step 0.5 (Analysis Configuration) - time period already calculated as {analysis_days} days
+- Template 2 (Performance Schema check) - not needed for log analysis  
+- Step 1 (Performance Schema patterns) - replaced by log analysis above
+- Step 3 (Traffic analysis) - already calculated from log file
+
+
+**EXECUTE IN THIS ORDER:**
+1. Template 1 (Database identification) - if not already done
+2. Template 4A (Table overview) - execute once
+3. **MISMATCH CHECK**: After Template 4A, compare log table names with schema table names
+   - If tables match → continue to Templates 4B-4E
+   - If tables DON'T match → STOP and ask user:
+     "The log shows queries on [X, Y, Z] tables but the database contains [A, B, C] tables. Would you like to:
+     1. Analyze a different database containing [X, Y, Z] tables
+     2. Create requirements using only log analysis patterns
+4. Templates 4B-4E (only if tables match)
+
+**DO NOT ask for analysis period - it's already calculated as {analysis_days} days.**
+
+{mysql_prompt}
+"""
+            
+            return result
+            
+        except Exception as e:
+            return f"Error analyzing log file: {str(e)}"
+    
+    else:
+        # Default performance schema analysis
+        prompt_file = Path(__file__).parent / 'prompts' / 'mysql_db_analyzer_perf_schema.md'
+        mysql_prompt = prompt_file.read_text(encoding='utf-8')
+        
+        integration_status = """MySQL Database Analysis for DynamoDB Migration
+
+I'll start by executing TEMPLATE 1 to identify the configured database. If MySQL tools aren't available, I'll provide configuration instructions.
+
+"""
+        
+        return integration_status + mysql_prompt
 
 
 @app.tool()
