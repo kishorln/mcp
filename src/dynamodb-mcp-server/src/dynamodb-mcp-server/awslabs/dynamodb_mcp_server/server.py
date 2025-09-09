@@ -257,6 +257,8 @@ Please choose your analysis method:
 1. **performance_schema** - Analyze live MySQL database using Performance Schema
 2. **log_file** - Analyze historical MySQL general log files offline
 
+🚨 **CRITICAL: You must call this tool again with your choice**
+
 Usage:
 - For live database: mysql_database_analysis(analysis_type="performance_schema")
 - For log files: mysql_database_analysis(analysis_type="log_file", log_file_path="~/path/to/mysql.log")
@@ -294,9 +296,8 @@ What's the path to your MySQL log file?
             
             # Parse and analyze log file
             queries = parse_mysql_log_file(expanded_path)
-            patterns = analyze_query_patterns(queries)
             
-            if not queries:
+            if queries is None:
                 return f"""Could not parse log file: {expanded_path}
 
 **Supported MySQL log formats:**
@@ -327,6 +328,47 @@ EVENT_TIME,USER_HOST,THREAD_ID,SERVER_ID,COMMAND_TYPE,ARGUMENT,DATABASE
 - Connection: CONNECTION_ID or THREAD_ID (optional, defaults to '0')
 
 Please ensure your log file includes the required columns.
+"""
+            
+            if len(queries) == 0:
+                return f"""Successfully parsed log file but found no queries: {expanded_path}
+
+The log file was parsed correctly but contains no SQL queries. This could mean:
+- The log file is empty
+- The log contains only non-SQL entries
+- All queries were filtered out as system/administrative queries
+
+Please check if this is the correct log file or try a log file with actual application queries.
+"""
+            
+            patterns = analyze_query_patterns(queries)
+            
+            if len(patterns) == 0:
+                return f"""Successfully parsed {len(queries)} queries but found no application patterns: {expanded_path}
+
+**Analysis Results:**
+- Total queries parsed: {len(queries)}
+- Application queries found: 0 (all filtered as system/administrative)
+
+The log file contains only system/administrative queries such as:
+- SET statements, SHOW commands
+- Administrative user management (ALTER USER, etc.)
+- Performance schema queries
+- Empty/blank queries
+
+**Recommendation:** 
+This log appears to be from a maintenance period or doesn't contain actual business application traffic. For DynamoDB migration analysis, you need logs containing:
+- SELECT queries with WHERE clauses
+- INSERT/UPDATE/DELETE operations
+- Application-driven database access patterns
+
+**Next Steps:**
+Would you like to:
+1. **Try a different log file** with actual application queries
+2. **Proceed with manual requirements gathering** (I'll ask questions about your application)
+3. **Connect to your database** for schema analysis (if available)
+
+Please let me know which option you'd prefer.
 """
             
             # Calculate time span
@@ -360,32 +402,91 @@ Please ensure your log file includes the required columns.
             prompt_file = Path(__file__).parent / 'prompts' / 'mysql_db_analyzer_perf_schema.md'
             mysql_prompt = prompt_file.read_text(encoding='utf-8')
             
+            # Extract specific templates needed for log file analysis
+            templates_needed = [
+                ('### TEMPLATE 1 - DATABASE IDENTIFICATION', '### TEMPLATE 2'),
+                ('### TEMPLATE 4A - TABLE ANALYSIS', '### TEMPLATE 4B'), 
+                ('### TEMPLATE 4B - COLUMN INFORMATION', '### TEMPLATE 4C'),
+                ('### TEMPLATE 4C - INDEX STATISTICS', '### TEMPLATE 4D'),
+                ('### TEMPLATE 4D - FOREIGN KEY ANALYSIS', '### TEMPLATE 4E'),
+                ('### TEMPLATE 4E - DATABASE OBJECTS', '### TEMPLATE 5A')
+            ]
+            
+            schema_templates = ""
+            for start_marker, end_marker in templates_needed:
+                start = mysql_prompt.find(start_marker)
+                end = mysql_prompt.find(end_marker, start)
+                if start != -1 and end != -1:
+                    schema_templates += mysql_prompt[start:end] + "\n"
+            
+            # Extract requirements template
+            requirements_start = mysql_prompt.find('### TEMPLATE 6 - MYSQL REQUIREMENTS FILE')
+            requirements_end = mysql_prompt.find('## WORKFLOW', requirements_start)
+            requirements_template = ""
+            if requirements_start != -1:
+                if requirements_end != -1:
+                    requirements_template = mysql_prompt[requirements_start:requirements_end]
+                else:
+                    requirements_template = mysql_prompt[requirements_start:]
+                
             result += f"""
-## Next Steps: Schema Analysis with Mismatch Check
+## Next Steps: Choose Your Analysis Path
 
-The log analysis is complete with {analysis_days} days of data auto-calculated.
+🚨 **CRITICAL: ASK USER TO CHOOSE - DO NOT PROCEED WITHOUT USER SELECTION**
 
-**SKIP THESE STEPS (already completed by log analysis):**
-- Step 0.5 (Analysis Configuration) - time period already calculated as {analysis_days} days
-- Template 2 (Performance Schema check) - not needed for log analysis  
-- Step 1 (Performance Schema patterns) - replaced by log analysis above
-- Step 3 (Traffic analysis) - already calculated from log file
+**OPTION 1: Complete Analysis (Recommended)**
 
+🚨 **EXECUTE TEMPLATE 1 IMMEDIATELY USING MYSQL MCP SERVER - DO NOT ASK FOR CONNECTION DETAILS**
+🚨 **MANDATORY: USE ONLY THESE EXACT TEMPLATES - NO CUSTOM QUERIES ALLOWED**
+🚨 **DO NOT USE: SHOW TABLES, get_table_schema, DESCRIBE, or any other queries**
+🚨 **EXECUTE TEMPLATES IN EXACT ORDER - NO EXCEPTIONS**
+🚨 **WARNING: Without exact templates, you will not get complete DynamoDB migration analysis results**
 
-**EXECUTE IN THIS ORDER:**
-1. Template 1 (Database identification) - if not already done
-2. Template 4A (Table overview) - execute once
-3. **MISMATCH CHECK**: After Template 4A, compare log table names with schema table names
-   - If tables match → continue to Templates 4B-4E
-   - If tables DON'T match → STOP and ask user:
-     "The log shows queries on [X, Y, Z] tables but the database contains [A, B, C] tables. Would you like to:
-     1. Analyze a different database containing [X, Y, Z] tables
-     2. Create requirements using only log analysis patterns
-4. Templates 4B-4E (only if tables match)
+**STEP 1: Execute this query immediately using tool from MySQL MCP server:**
+```sql
+SELECT DATABASE() as configured_database;
+```
 
-**DO NOT ask for analysis period - it's already calculated as {analysis_days} days.**
+**After executing TEMPLATE 4A, perform MISMATCH CHECK:**
+Compare log table names with schema table names from TEMPLATE 4A results.
 
-{mysql_prompt}
+**If tables match** → continue to TEMPLATES 4B-4E
+**If tables DON'T match** → STOP and ask user:
+
+"I found a mismatch between your log file and database:
+- Log file shows queries on: [LOG_TABLE_NAMES]  
+- Database contains tables: [SCHEMA_TABLE_NAMES]
+
+Would you like to:
+1. **Analyze a different database** containing the log file tables
+2. **Proceed with log-only analysis** using query patterns from the log
+
+🚨 **CRITICAL: Wait for user choice - do not proceed automatically**
+
+Which option would you prefer?"
+
+**If TEMPLATE 1 fails (connection issue), ask user:**
+"I cannot connect to your MySQL database. Would you like to:
+1. **Fix the connection** - I'll provide MySQL MCP setup instructions
+2. **Proceed with log-only analysis** - Use the query patterns we already discovered
+
+Which option would you prefer?"
+
+{schema_templates}
+
+**After completing all schema templates, create requirements file:**
+{requirements_template}
+
+**OPTION 2: Log-Only Analysis**
+Skip database connection and create requirements file with log analysis data only:
+
+{requirements_template}
+
+🚨 **STOP HERE - ASK USER: "Would you like to try Option 1 (database connection with EXACT TEMPLATES) or proceed with Option 2 (log-only analysis)?"**
+
+**DO NOT CREATE REQUIREMENTS FILE UNTIL USER CHOOSES**
+**DO NOT USE ANY QUERIES OTHER THAN THE SPECIFIED TEMPLATES**
+**DO NOT ASK FOR CONNECTION DETAILS - TRY TEMPLATE 1 FIRST**
 """
             
             return result
@@ -400,7 +501,11 @@ The log analysis is complete with {analysis_days} days of data auto-calculated.
         
         integration_status = """MySQL Database Analysis for DynamoDB Migration
 
-I'll start by executing TEMPLATE 1 to identify the configured database. If MySQL tools aren't available, I'll provide configuration instructions.
+🚨 **EXECUTE TEMPLATE 1 IMMEDIATELY USING MySQL MCP SERVER - DO NOT USE AWS CLI OR BASH**
+
+🚨 **MANDATORY: Use run_query from mcp server awslabs.mysql-mcp-server**
+
+I'll start by executing TEMPLATE 1 using the MySQL MCP server. If it fails, I'll provide configuration instructions.
 
 """
         

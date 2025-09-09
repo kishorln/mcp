@@ -13,13 +13,7 @@ SELECT DATABASE() as configured_database;
 
 ### TEMPLATE 2 - GENERAL LOG CHECK
 ```sql
-SELECT 
-  @@global.performance_schema as performance_schema_enabled,
-  CASE 
-    WHEN @@global.performance_schema = 1 THEN 'SUCCESS: Performance Schema log is enabled already and ready for analysis'
-    WHEN @@global.performance_schema = 0 THEN 'ERROR: Performance Schema log is disabled'
-    ELSE 'ERROR: Performance Schema log configuration issue'
-  END as status;
+SHOW VARIABLES LIKE 'performance_schema';
 ```
 
 ### TEMPLATE 3 - PATTERN ANALYSIS (PERFORMANCE SCHEMA CONFIGURABLE)
@@ -247,16 +241,12 @@ ORDER BY analysis_date DESC, analysis_hour DESC;
 [List all foreign key relationships with rules and estimated cardinality from analysis]
 
 ### Entity Relationship Diagram
-```mermaid
-erDiagram
-[Create ERD diagram based on schema analysis results - include all tables from TEMPLATE 4A with their columns from TEMPLATE 4B and relationships from TEMPLATE 4D. Show primary keys (PK), foreign keys (FK), and unique keys (UK). Include relationship cardinalities and connection labels.]
-```
+
+[Create ERD diagram using mermaid syntax. Start with: erDiagram, then include all tables from TEMPLATE 4A with their columns from TEMPLATE 4B and relationships from TEMPLATE 4D. Show primary keys (PK), foreign keys (FK), and unique keys (UK). Include relationship cardinalities and connection labels.]
 
 ### Access Pattern Flow Diagram
-```mermaid
-flowchart TD
-[Create access pattern flow diagram based on discovered patterns from TEMPLATE 3. Show how user actions trigger database operations, connecting high-frequency patterns and showing the flow from user interactions to database queries.]
-```
+
+[Create access pattern flow diagram using mermaid syntax. Start with: flowchart TD, then show how user actions trigger database operations, connecting high-frequency patterns and showing the flow from user interactions to database queries based on TEMPLATE 3 results.]
 
 ## Access Patterns Discovered
 
@@ -325,27 +315,39 @@ flowchart TD
 
 ## WORKFLOW
 
-### Step 0: Database Identification
+### CRITICAL: Analysis Type Determines Workflow Path
+
+**FOR LOG FILE ANALYSIS:**
+- Skip all database connection steps (TEMPLATES 1-5A)
+- Use log file analysis results directly
+- Proceed to TEMPLATE 6 - Create mysql_requirements.md with log analysis data
+- DO NOT connect to database or run any SQL queries
+
+**FOR PERFORMANCE SCHEMA ANALYSIS:**
+- Follow the complete workflow below (Steps 0-4)
+
+### Step 0: Database Identification (PERFORMANCE SCHEMA ONLY)
 1. Execute TEMPLATE 1 - DATABASE IDENTIFICATION
    - If this fails: Provide MySQL MCP configuration instructions below, then STOP
 
-2. Execute TEMPLATE 2 - PERFORMANCE SCHEMA LOG CHECK
-   - If general_log is disabled: STOP and provide configuration instructions
- 
-**CRITICAL**: Do NOT proceed with analysis if MySQL Performance log is not properly configured for TABLE output.
+2. Execute TEMPLATE 2 - PERFORMANCE SCHEMA LOG CHECK **ONCE ONLY**
+   - If performance_schema is disabled: STOP and provide configuration instructions
    - If successful: Continue with remaining steps
-2. Execute TEMPLATE 2 - PERFORMANCE SCHEMA LOG CHECK
+   - **DO NOT EXECUTE ANY ADDITIONAL QUERIES TO "VERIFY" OR "SIMPLIFY" - TEMPLATE 2 IS SUFFICIENT**
+ 
+**CRITICAL**: Do NOT proceed with analysis if MySQL Performance Schema is not enabled.
 
 **AI Response Template for TEMPLATE 2:**
+🚨 **EXECUTE TEMPLATE 2 ONCE - DO NOT RUN ADDITIONAL QUERIES**
 ```
 🤖 AI: "Checking MySQL performance_schema status...
 
 Database: [DATABASE_NAME]
 Performance Schema Log: [ENABLED/DISABLED]
 
-[IF DISABLED OR FILE OUTPUT]: ❌ Performance Schema needs configuration for Aurora / RDS MySQL:
+[IF DISABLED]: ❌ Performance Schema needs configuration for Aurora / RDS MySQL:
 
-📋 RDS MySQL General Log Setup:
+📋 RDS MySQL Performance Schema Setup:
 1. Open Amazon RDS console → Parameter groups
 2. Select your custom parameter group (create one if needed)
 3. Set these parameters:
@@ -357,6 +359,7 @@ Wait 5-10 minutes for logs to populate, then retry analysis.
 
 [IF ENABLED]: ✅ Performance Schema log is ready for analysis.
 ```
+🚨 **STOP HERE - DO NOT EXECUTE SHOW VARIABLES OR ANY OTHER QUERIES**
 
 **CRITICAL**: If performance_schema is disabled, log_output is not TABLE, or no recent data exists, STOP analysis and provide RDS configuration instructions.
 

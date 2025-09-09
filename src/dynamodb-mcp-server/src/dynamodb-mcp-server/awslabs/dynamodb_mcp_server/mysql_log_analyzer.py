@@ -253,17 +253,33 @@ def _is_system_query(query: str) -> bool:
     """Filter out system/administrative queries"""
     query_upper = query.upper().strip()
     
+    # Filter out empty/blank queries
+    if not query_upper or query_upper == '':
+        return True
+    
     # Prefix patterns (must start with these)
     prefix_patterns = [
-        'SELECT @@', 'SET GLOBAL', 'SET SESSION', 'SHOW ', 'DESCRIBE ', 'EXPLAIN ', 'USE ',
-        '/* RDS DATA API */'
+        'SELECT @@', 'SET GLOBAL', 'SET SESSION', 'SET LOCAL', 'SET @@', 'SET ',
+        'SHOW ', 'DESCRIBE ', 'EXPLAIN ', 'USE ', 'COMMIT', 'ROLLBACK',
+        'START TRANSACTION', 'BEGIN', '/* RDS DATA API */', 'ALTER USER'
     ]
     
     # Keyword patterns (anywhere in query)
     keyword_patterns = [
         'INFORMATION_SCHEMA', 'PERFORMANCE_SCHEMA', 'MYSQL.', 'SYS.',
-        'DIGEST_TEXT', 'EVENTS_STATEMENTS_', '@@GLOBAL', '@@SESSION'
+        'DIGEST_TEXT', 'EVENTS_STATEMENTS_', '@@GLOBAL', '@@SESSION',
+        'OSCAR_LOCAL_ONLY_REPLICA_HOST_STATUS', 'SQL_LOG_BIN', 'CHARACTER_SET_RESULTS',
+        'AUTOCOMMIT', 'SQL_MODE', 'RDSADMIN@'
     ]
+    
+    # Exact match patterns
+    exact_patterns = [
+        'SELECT 1', 'COMMIT', 'ROLLBACK'
+    ]
+    
+    # Check exact patterns first
+    if query_upper in exact_patterns:
+        return True
     
     # Check prefix patterns
     if any(query_upper.startswith(pattern) for pattern in prefix_patterns):
