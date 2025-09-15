@@ -46,13 +46,14 @@ from awslabs.dynamodb_mcp_server.common import (
     handle_exceptions,
     mutation_check,
 )
+from awslabs.mysql_mcp_server.server import DBConnectionSingleton
+from awslabs.mysql_mcp_server.server import run_query as mysql_query
 from botocore.config import Config
+from loguru import logger
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path
 from pydantic import Field
-from typing import Any, Dict, List, Literal, Union, Optional, Annotated
-
-from awslabs.mysql_mcp_server.server import DBConnectionSingleton, run_query as mysql_query
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 
 # Define server instructions and dependencies
@@ -956,29 +957,65 @@ async def mysql_run_query(
     ] = None,
 ) -> list[dict]:
     """Run a SQL query against a MySQL database for analysis and migration planning."""
-    
-    if all([os.getenv('MYSQL_CLUSTER_ARN'), os.getenv('MYSQL_SECRET_ARN'), os.getenv('MYSQL_DATABASE')]):
-        
-        cluster_arn = os.getenv('MYSQL_CLUSTER_ARN')
-        secret_arn = os.getenv('MYSQL_SECRET_ARN')
-        database = os.getenv('MYSQL_DATABASE')
-        region = os.getenv('AWS_REGION', 'us-west-2')
-        readonly = os.getenv('MYSQL_READONLY', 'true').lower() == 'true'
-        
-        try:
-            DBConnectionSingleton.initialize(cluster_arn, secret_arn, database, region, readonly)
-        except Exception as e:
-            return [{'error': f'MySQL initialization failed: {str(e)}'}]
-    else:
-        return [{'error': 'MySQL configuration not properly configured or available'}]
-    
-    class DummyContext:
-        async def error(self, message): pass
-    
+    required_vars = {
+        'MYSQL_CLUSTER_ARN': 'RDS cluster ARN (e.g., arn:aws:rds:region:account:cluster:cluster-name)',
+        'MYSQL_SECRET_ARN': 'Secrets Manager secret ARN containing database credentials',
+        'MYSQL_DATABASE': 'Database name to connect to',
+    }
+
+    missing_vars = {var: desc for var, desc in required_vars.items() if not os.getenv(var)}
+
+    if missing_vars:
+        error_details = [f'{var}: {desc}' for var, desc in missing_vars.items()]
+        logger.error(
+            f'DynamoDB-MySQL integration: Missing required environment variables: {list(missing_vars.keys())}'
+        )
+        return [
+            {
+                'error': f'MySQL integration requires these environment variables: {", ".join(missing_vars.keys())}',
+                'required_variables': error_details,
+                'documentation': 'https://github.com/awslabs/mcp/tree/main/src/dynamodb-mcp-server#mysql-integration',
+            }
+        ]
+
+    # Get configuration
+    cluster_arn = os.getenv('MYSQL_CLUSTER_ARN')
+    secret_arn = os.getenv('MYSQL_SECRET_ARN')
+    database = os.getenv('MYSQL_DATABASE')
+    region = os.getenv('MYSQL_AWS_REGION', 'us-west-2')
+    readonly = os.getenv('MYSQL_READONLY', 'true').lower() == 'true'
+
+    # Log integration attempt
+    logger.info(
+        f"DynamoDB-MySQL integration: Executing query on database '{database}' in region '{region}'"
+    )
+
     try:
-        return await mysql_query(sql, DummyContext(), None, query_parameters)
+        # Initialize connection
+        DBConnectionSingleton.initialize(cluster_arn, secret_arn, database, region, readonly)
+        logger.info('DynamoDB-MySQL integration: Connection initialized successfully')
     except Exception as e:
+        # Log initializion error
+        logger.error(
+            f'DynamoDB-MySQL integration: Connection initialization failed - {type(e).__name__}: {str(e)}'
+        )
+        return [{'error': f'MySQL connection failed: {str(e)}'}]
+
+    class DummyContext:
+        async def error(self, message):
+            logger.error(f'MySQL query context error: {message}')
+
+    try:
+        # Execute query
+        result = await mysql_query(sql, DummyContext(), None, query_parameters)
+        return result
+    except Exception as e:
+        # Log query execution issue
+        logger.error(
+            f'DynamoDB-MySQL integration: Query execution failed - {type(e).__name__}: {str(e)}'
+        )
         return [{'error': f'MySQL query failed: {str(e)}'}]
+
 
 def main():
     """Main entry point for the MCP server application."""
