@@ -957,49 +957,43 @@ async def mysql_run_query(
     ] = None,
 ) -> list[dict]:
     """Run a SQL query against a MySQL database for analysis and migration planning."""
-    required_vars = {
-        'MYSQL_CLUSTER_ARN': 'RDS cluster ARN (e.g., arn:aws:rds:region:account:cluster:cluster-name)',
-        'MYSQL_SECRET_ARN': 'Secrets Manager secret ARN containing database credentials',
-        'MYSQL_DATABASE': 'Database name to connect to',
-    }
+    if all(
+        [
+            os.getenv('MYSQL_CLUSTER_ARN'),
+            os.getenv('MYSQL_SECRET_ARN'),
+            os.getenv('MYSQL_DATABASE'),
+        ]
+    ):
+        cluster_arn = os.getenv('MYSQL_CLUSTER_ARN')
+        secret_arn = os.getenv('MYSQL_SECRET_ARN')
+        database = os.getenv('MYSQL_DATABASE')
+        region = os.getenv('AWS_REGION', 'us-west-2')
+        readonly = os.getenv('MYSQL_READONLY', 'true').lower() == 'true'
 
-    missing_vars = {var: desc for var, desc in required_vars.items() if not os.getenv(var)}
+        try:
+            DBConnectionSingleton.initialize(cluster_arn, secret_arn, database, region, readonly)
+        except Exception as e:
+            logger.error(f'MySQL initialization failed - {type(e).__name__}: {str(e)}')
+            return [{'error': f'MySQL initialization failed: {str(e)}'}]
+    else:
+        missing_vars = []
+        if not os.getenv('MYSQL_CLUSTER_ARN'):
+            missing_vars.append('MYSQL_CLUSTER_ARN (RDS cluster ARN)')
+        if not os.getenv('MYSQL_SECRET_ARN'):
+            missing_vars.append('MYSQL_SECRET_ARN (Secrets Manager ARN)')
+        if not os.getenv('MYSQL_DATABASE'):
+            missing_vars.append('MYSQL_DATABASE (Database name)')
 
-    if missing_vars:
-        error_details = [f'{var}: {desc}' for var, desc in missing_vars.items()]
         logger.error(
-            f'DynamoDB-MySQL integration: Missing required environment variables: {list(missing_vars.keys())}'
+            f'MySQL integration: Missing required environment variables: {[var.split()[0] for var in missing_vars]}'
         )
         return [
             {
-                'error': f'MySQL integration requires these environment variables: {", ".join(missing_vars.keys())}',
-                'required_variables': error_details,
+                'error': f'MySQL integration requires these environment variables: {", ".join([var.split()[0] for var in missing_vars])}',
+                'required_variables': missing_vars,
                 'documentation': 'https://github.com/awslabs/mcp/tree/main/src/dynamodb-mcp-server#mysql-integration',
             }
         ]
-
-    # Get configuration
-    cluster_arn = os.getenv('MYSQL_CLUSTER_ARN')
-    secret_arn = os.getenv('MYSQL_SECRET_ARN')
-    database = os.getenv('MYSQL_DATABASE')
-    region = os.getenv('MYSQL_AWS_REGION', 'us-west-2')
-    readonly = os.getenv('MYSQL_READONLY', 'true').lower() == 'true'
-
-    # Log integration attempt
-    logger.info(
-        f"DynamoDB-MySQL integration: Executing query on database '{database}' in region '{region}'"
-    )
-
-    try:
-        # Initialize connection
-        DBConnectionSingleton.initialize(cluster_arn, secret_arn, database, region, readonly)
-        logger.info('DynamoDB-MySQL integration: Connection initialized successfully')
-    except Exception as e:
-        # Log initializion error
-        logger.error(
-            f'DynamoDB-MySQL integration: Connection initialization failed - {type(e).__name__}: {str(e)}'
-        )
-        return [{'error': f'MySQL connection failed: {str(e)}'}]
 
     class DummyContext:
         async def error(self, message):
