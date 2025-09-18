@@ -2,12 +2,16 @@
 
 The official MCP Server for interacting with AWS DynamoDB
 
-This comprehensive server provides both operational DynamoDB management and expert design guidance, featuring 30+ operational tools for managing DynamoDB tables, items, indexes, backups, and more, expert data modeling guidance.
+This comprehensive server provides both operational DynamoDB management and expert design guidance, featuring 30+ operational tools for managing DynamoDB tables, items, indexes, backups, and more, expert data modeling guidance and also MySQL query capabilities for database analysis and migration planning.
 
 ## Available MCP Tools
 
 ### Design & Modeling
 - `dynamodb_data_modeling` - Retrieves the complete DynamoDB Data Modeling Expert prompt
+
+### Source Database Analysis for Migration Planning
+- `analyze_access_patterns` - Analyze database access patterns and traffic for DynamoDB migration planning
+- `analyze_schema` - Analyze database schema structure for DynamoDB migration planning
 
 ### Table Operations
 - `create_table` - Creates a new DynamoDB table with optional secondary indexes
@@ -61,6 +65,61 @@ To use these tools, ensure you have proper AWS credentials configured with appro
 
 All tools support an optional `region_name` parameter to specify which AWS region to operate in. If not provided, it will use the AWS_REGION environment variable or default to 'us-west-2'.
 
+## Source Database Integration
+
+The DynamoDB MCP server includes source database integration for database analysis and migration planning.
+Currently supports Aurora MySQL with additional database support planned for future releases.
+
+### MySQL Environment Variables
+
+**Prerequisites for MySQL Integration:**
+1. Aurora MySQL Cluster with MySQL username and password stored in AWS Secrets Manager
+2. Enable RDS Data API for your Aurora MySQL Cluster
+3. **Enable Performance Schema** for access pattern analysis:
+   - Open Amazon RDS console → Parameter groups
+   - Select your custom parameter group (create one if needed)
+   - Set parameter: `performance_schema = 1`
+   - Associate parameter group with your DB instance
+   - Reboot the database instance (required for Performance Schema)
+   - Wait 5-10 minutes for performance logs to populate
+4. Set up AWS credentials with access to AWS services:
+   - Configure AWS credentials with `aws configure` or environment variables
+   - AWS profile with permissions to access RDS Data API and AWS Secrets Manager
+
+Add these environment variables to DynamoDB MCP Server configuration to enable MySQL integration:
+
+- `MYSQL_CLUSTER_ARN`: RDS / Aurora MySQL cluster ARN
+- `MYSQL_SECRET_ARN`: AWS Secrets Manager secret ARN with database credentials
+- `MYSQL_DATABASE`: Database name to connect to
+- `MYSQL_AWS_REGION`: AWS region for MySQL cluster (optional, defaults to AWS_REGION)
+- `MYSQL_READONLY`: optional (default: "true")
+
+**Note**: MySQL source database connection is established only when you set these environment variables in config and enables you to run the migration analysis tools such as `analyze_access_patterns` and `analyze_schema`.
+
+## Source-DB to DynamoDB Data Modeling Workflow
+
+To design a DynamoDB data model based on your existing MySQL database, follow this workflow using the analysis tools:
+
+### 1. Analyze MySQL Access Patterns
+```
+Analyze access patterns for my MySQL database "employees" over the last 30 days
+```
+This analyzes query patterns, RPS, and identifies hot access patterns from MySQL Performance Schema.
+
+### 2. Analyze MySQL Schema Structure
+```
+Analyze the schema structure of my MySQL database "employees"
+```
+This examines table structures, relationships, indexes, and data distribution.
+
+### 3. Design DynamoDB Schema
+```
+Help me design a DynamoDB data model using the analysis results
+```
+This invoke the DynamoDB data modeling tool to design your schema using the analysis from step 1 and 2.
+
+**Note**: Execute these steps manually in sequence for complete data modeling analysis.
+
 ## Prerequisites
 
 1. Install `uv` from [Astral](https://docs.astral.sh/uv/getting-started/installation/) or the [GitHub README](https://github.com/astral-sh/uv#installation)
@@ -86,7 +145,11 @@ Add the MCP to your favorite agentic tools. (e.g. for Amazon Q Developer CLI MCP
         "DDB-MCP-READONLY": "true",
         "AWS_PROFILE": "default",
         "AWS_REGION": "us-west-2",
-        "FASTMCP_LOG_LEVEL": "ERROR"
+        "FASTMCP_LOG_LEVEL": "ERROR",
+        "MYSQL_CLUSTER_ARN": "arn:aws:rds:region:account:cluster:cluster-name",
+        "MYSQL_SECRET_ARN": "arn:aws:secretsmanager:region:account:secret:secret-name",
+        "MYSQL_DATABASE": "your-database-name",
+        "MYSQL_READONLY": "true"
       },
       "disabled": false,
       "autoApprove": []
@@ -116,7 +179,11 @@ For Windows users, the MCP server configuration format is slightly different:
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR",
         "AWS_PROFILE": "your-aws-profile",
-        "AWS_REGION": "us-east-1"
+        "AWS_REGION": "us-east-1",
+        "MYSQL_CLUSTER_ARN": "arn:aws:rds:region:account:cluster:cluster-name",
+        "MYSQL_SECRET_ARN": "arn:aws:secretsmanager:region:account:secret:secret-name",
+        "MYSQL_DATABASE": "your-database-name",
+        "MYSQL_READONLY": "true"
       }
     }
   }
