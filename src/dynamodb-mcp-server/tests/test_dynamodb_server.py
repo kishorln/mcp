@@ -3,6 +3,8 @@ import boto3
 import pytest
 import pytest_asyncio
 from awslabs.dynamodb_mcp_server.server import (
+    analyze_access_patterns,
+    analyze_schema,
     create_backup,
     create_table,
     delete_item,
@@ -928,3 +930,183 @@ async def test_dynamodb_data_modeling_mcp_integration():
     assert modeling_tool.description is not None
     assert 'DynamoDB' in modeling_tool.description
     assert 'data modeling' in modeling_tool.description.lower()
+
+
+@pytest.mark.asyncio
+async def test_analyze_access_patterns_success(mysql_env_setup, monkeypatch):
+    """Test successful access pattern analysis."""
+
+    # Mock performance schema check and analysis results
+    async def mock_mysql_run_query(sql, *args, **kwargs):
+        if 'performance_schema' in sql:
+            return [{'Variable_name': 'performance_schema', 'Value': 'ON'}]
+        elif 'pattern_analysis' in sql or 'DIGEST_TEXT' in sql:
+            return [
+                {
+                    'DIGEST_TEXT': 'SELECT * FROM employees WHERE emp_no = ?',
+                    'COUNT_STAR': 100,
+                    'calculated_rps': 0.05,
+                },
+                {
+                    'DIGEST_TEXT': 'INSERT INTO salaries VALUES (...)',
+                    'COUNT_STAR': 50,
+                    'calculated_rps': 0.025,
+                },
+            ]
+        elif 'rps_calculation' in sql or 'total_queries' in sql:
+            return [{'total_queries': 150, 'avg_rps_this_hour': 0.042}]
+        return []
+
+    monkeypatch.setattr('awslabs.dynamodb_mcp_server.server.mysql_run_query', mock_mysql_run_query)
+
+    result = await analyze_access_patterns('mysql', 'employees', 30)
+
+    assert 'Access Pattern Analysis Results:' in result
+    assert 'RPS Analysis Results:' in result
+    assert 'employees' in result
+
+
+@pytest.mark.asyncio
+async def test_analyze_access_patterns_performance_schema_disabled(mysql_env_setup, monkeypatch):
+    """Test access pattern analysis when performance schema is disabled."""
+
+    # Mock performance schema disabled
+    async def mock_mysql_run_query(sql, *args, **kwargs):
+        if 'performance_schema' in sql:
+            return [{'Variable_name': 'performance_schema', 'Value': 'OFF'}]
+        return []
+
+    monkeypatch.setattr('awslabs.dynamodb_mcp_server.server.mysql_run_query', mock_mysql_run_query)
+
+    result = await analyze_access_patterns('mysql', 'employees', 30)
+
+    assert 'MySQL Performance Schema is disabled' in result
+    assert 'Parameter groups' in result
+
+
+@pytest.mark.asyncio
+async def test_analyze_schema_success(mysql_env_setup, monkeypatch):
+    """Test successful schema analysis."""
+
+    # Mock schema analysis results
+    async def mock_mysql_run_query(sql, *args, **kwargs):
+        if 'TABLE_NAME' in sql and 'TABLE_ROWS' in sql:
+            return [
+                {
+                    'TABLE_NAME': 'employees',
+                    'TABLE_ROWS': 300000,
+                    'datamb': '15.2',
+                    'indexmb': '2.1',
+                },
+                {
+                    'TABLE_NAME': 'salaries',
+                    'TABLE_ROWS': 2800000,
+                    'datamb': '120.5',
+                    'indexmb': '0.0',
+                },
+            ]
+        elif 'COLUMN_NAME' in sql:
+            return [
+                {
+                    'TABLE_NAME': 'employees',
+                    'COLUMN_NAME': 'emp_no',
+                    'COLUMN_TYPE': 'int',
+                    'COLUMN_KEY': 'PRI',
+                },
+                {
+                    'TABLE_NAME': 'employees',
+                    'COLUMN_NAME': 'first_name',
+                    'COLUMN_TYPE': 'varchar(14)',
+                    'COLUMN_KEY': '',
+                },
+            ]
+        elif 'INDEX_NAME' in sql:
+            return [
+                {
+                    'TABLE_NAME': 'employees',
+                    'INDEX_NAME': 'PRIMARY',
+                    'COLUMN_NAME': 'emp_no',
+                    'NON_UNIQUE': 0,
+                }
+            ]
+        elif 'CONSTRAINT_NAME' in sql:
+            return [
+                {
+                    'CONSTRAINT_NAME': 'fk_emp_dept',
+                    'child_table': 'dept_emp',
+                    'parent_table': 'employees',
+                }
+            ]
+        elif 'object_type' in sql:
+            return [
+                {'object_type': 'Tables', 'count': 6, 'names': 'employees,salaries,titles'},
+                {'object_type': 'Triggers', 'count': 0, 'names': 'None'},
+            ]
+        return []
+
+    monkeypatch.setattr('awslabs.dynamodb_mcp_server.server.mysql_run_query', mock_mysql_run_query)
+
+    result = await analyze_schema('mysql', 'employees')
+
+    assert 'Schema Analysis Results:' in result
+    assert 'Tables:' in result
+    assert 'employees' in result
+
+
+@pytest.mark.asyncio
+async def test_analyze_unsupported_database(monkeypatch):
+    """Test analysis with unsupported database type."""
+    result = await analyze_access_patterns('postgresql', 'test_db', 30)
+    assert 'Unsupported source database type: postgresql' in result
+
+    result = await analyze_schema('oracle', 'test_db')
+    assert 'Unsupported source database type: oracle' in result
+
+
+@pytest.mark.asyncio
+async def test_analyze_access_patterns_empty_results(mysql_env_setup, monkeypatch):
+    """Test access pattern analysis with empty query results."""
+
+    async def mock_mysql_run_query(sql, *args, **kwargs):
+        if 'performance_schema' in sql:
+            return [{'Variable_name': 'performance_schema', 'Value': 'ON'}]
+        return []  # Empty results
+
+    monkeypatch.setattr('awslabs.dynamodb_mcp_server.server.mysql_run_query', mock_mysql_run_query)
+
+    result = await analyze_access_patterns('mysql', 'empty_db', 30)
+    assert 'Access Pattern Analysis Results:' in result
+    assert 'empty_db' in result
+
+
+@pytest.mark.asyncio
+async def test_analyze_schema_sql_error(mysql_env_setup, monkeypatch):
+    """Test schema analysis with SQL error."""
+
+    async def mock_mysql_run_query(sql, *args, **kwargs):
+        return [{'error': 'Table does not exist'}]
+
+    monkeypatch.setattr('awslabs.dynamodb_mcp_server.server.mysql_run_query', mock_mysql_run_query)
+
+    result = await analyze_schema('mysql', 'nonexistent_db')
+    assert 'Table analysis failed: Table does not exist' in result
+
+
+@pytest.mark.asyncio
+async def test_analyze_access_patterns_invalid_parameters(mysql_env_setup, monkeypatch):
+    """Test access pattern analysis with invalid parameters."""
+
+    async def mock_mysql_run_query(sql, *args, **kwargs):
+        if 'performance_schema' in sql:
+            return [{'Variable_name': 'performance_schema', 'Value': 'ON'}]
+        return []
+
+    monkeypatch.setattr('awslabs.dynamodb_mcp_server.server.mysql_run_query', mock_mysql_run_query)
+
+    # Test with zero days
+    result = await analyze_access_patterns('mysql', 'test_db', 0)
+    assert 'Access Pattern Analysis Results:' in result
+
+    # Test with negative days
+    result = await analyze_access_patterns('mysql', 'test_db', -5)
+    assert 'Access Pattern Analysis Results:' in result

@@ -46,18 +46,25 @@ from awslabs.dynamodb_mcp_server.common import (
     handle_exceptions,
     mutation_check,
 )
+from awslabs.dynamodb_mcp_server.database_analysis_queries import get_query_resource
+from awslabs.mysql_mcp_server.server import DBConnectionSingleton
+from awslabs.mysql_mcp_server.server import run_query as mysql_query
 from botocore.config import Config
+from loguru import logger
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path
 from pydantic import Field
-from typing import Any, Dict, List, Literal, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 
 # Define server instructions and dependencies
 SERVER_INSTRUCTIONS = """The official MCP Server for interacting with AWS DynamoDB
 
 This server provides comprehensive DynamoDB capabilities with over 30 operational tools for managing DynamoDB tables,
-items, indexes, backups, and more, plus expert data modeling guidance through DynamoDB data modeling expert prompt
+items, indexes, backups, and more, plus expert data modeling guidance through DynamoDB data modeling expert prompt.
+
+MySQL Integration: This server also includes MySQL query capabilities through the run_query tool, enabling database
+analysis and migration planning from MySQL to DynamoDB.
 
 IMPORTANT: DynamoDB Attribute Value Format
 -----------------------------------------
@@ -204,6 +211,164 @@ async def dynamodb_data_modeling() -> str:
     prompt_file = Path(__file__).parent / 'prompts' / 'dynamodb_architect.md'
     architect_prompt = prompt_file.read_text(encoding='utf-8')
     return architect_prompt
+
+
+async def mysql_run_query(
+    sql: Annotated[str, Field(description='The SQL query to run')],
+    query_parameters: Annotated[
+        Optional[List[Dict[str, Any]]], Field(description='Parameters for the SQL query')
+    ] = None,
+) -> list[dict]:
+    """Internal function to run SQL queries against MySQL database for analysis."""
+    if all(
+        [
+            os.getenv('MYSQL_CLUSTER_ARN'),
+            os.getenv('MYSQL_SECRET_ARN'),
+            os.getenv('MYSQL_DATABASE'),
+            os.getenv('MYSQL_AWS_REGION') or os.getenv('AWS_REGION'),
+        ]
+    ):
+        cluster_arn = os.getenv('MYSQL_CLUSTER_ARN')
+        secret_arn = os.getenv('MYSQL_SECRET_ARN')
+        database = os.getenv('MYSQL_DATABASE')
+        region = os.getenv('MYSQL_AWS_REGION') or os.getenv('AWS_REGION')
+        readonly = os.getenv('MYSQL_READONLY', 'true').lower() == 'true'
+
+        try:
+            DBConnectionSingleton.initialize(cluster_arn, secret_arn, database, region, readonly)
+        except Exception as e:
+            logger.error(f'MySQL initialization failed - {type(e).__name__}: {str(e)}')
+            return [{'error': f'MySQL initialization failed: {str(e)}'}]
+    else:
+        missing_vars = []
+        if not os.getenv('MYSQL_CLUSTER_ARN'):
+            missing_vars.append('MYSQL_CLUSTER_ARN (RDS cluster ARN)')
+        if not os.getenv('MYSQL_SECRET_ARN'):
+            missing_vars.append('MYSQL_SECRET_ARN (Secrets Manager ARN)')
+        if not os.getenv('MYSQL_DATABASE'):
+            missing_vars.append('MYSQL_DATABASE (Database name)')
+        if not (os.getenv('MYSQL_AWS_REGION') or os.getenv('AWS_REGION')):
+            missing_vars.append('MYSQL_AWS_REGION (AWS region, defaults to AWS_REGION)')
+
+        logger.error(
+            f'MySQL integration: Missing required environment variables: {[var.split()[0] for var in missing_vars]}'
+        )
+        return [
+            {
+                'error': f'MySQL integration requires these environment variables: {", ".join([var.split()[0] for var in missing_vars])}',
+                'required_variables': missing_vars,
+                'documentation': 'https://github.com/awslabs/mcp/tree/main/src/dynamodb-mcp-server#mysql-integration',
+            }
+        ]
+
+    class DummyContext:
+        async def error(self, message):
+            logger.error(f'MySQL query context error: {message}')
+
+    try:
+        result = await mysql_query(sql, DummyContext(), None, query_parameters)
+        return result
+    except Exception as e:
+        logger.error(
+            f'DynamoDB-MySQL integration: Query execution failed - {type(e).__name__}: {str(e)}'
+        )
+        return [{'error': f'MySQL query failed: {str(e)}'}]
+
+
+@app.tool()
+async def analyze_access_patterns(
+    source_db_type: str = Field(description="Source Database type: 'mysql'"),
+    target_database: str = Field(description='Database name to analyze'),
+    analysis_days: int = Field(default=30, description='Number of days to analyze'),
+) -> str:
+    """Analyze database access patterns and traffic for DynamoDB migration planning."""
+    source_db_type = source_db_type.lower()
+    if source_db_type not in ['mysql']:
+        return f'Unsupported source database type: {source_db_type}. Supported types: mysql'
+
+    perf_check = get_query_resource('performance_schema_check')
+    perf_result = await mysql_run_query(perf_check['sql'])
+
+    if not perf_result or perf_result[0].get('Value') != 'ON':
+        return """MySQL Performance Schema is disabled
+
+**Performance Schema Setup**:
+1. Open Amazon RDS console → Parameter groups
+2. Select your custom parameter group (create one if needed)
+3. Set the parameters:
+   - performance_schema = 1
+4. Associate parameter group with your DB instance
+5. Reboot required to make this work
+Wait 5-10 minutes for logs to populate, then retry analysis."""
+
+    queries = [
+        ('pattern_analysis', 'patterns', 'Pattern analysis'),
+        ('rps_calculation', 'rps_data', 'RPS analysis'),
+    ]
+
+    results = {}
+    for query_name, result_key, description in queries:
+        logger.info(f'Executing {description} for {source_db_type} database: {target_database}')
+        query = get_query_resource(
+            query_name, target_database=target_database, analysis_days=analysis_days
+        )
+        results[result_key] = await mysql_run_query(query['sql'])
+
+        if results[result_key] and 'error' in results[result_key][0]:
+            logger.error(f'{description} failed: {results[result_key][0]["error"]}')
+            return f'{description} failed: {results[result_key][0]["error"]}'
+
+    return f"""Access Pattern Analysis Results:
+{results['patterns']}
+
+RPS Analysis Results:
+{results['rps_data']}
+
+Analysis Metadata:
+- Source Database Type: {source_db_type}
+- Target Database: {target_database}
+- Analysis Days: {analysis_days}"""
+
+
+@app.tool()
+async def analyze_schema(
+    source_db_type: str = Field(description="Source Database type: 'mysql'"),
+    target_database: str = Field(description='Database name to analyze'),
+) -> str:
+    """Analyze database schema structure for DynamoDB migration planning."""
+    source_db_type = source_db_type.lower()
+    if source_db_type not in ['mysql']:
+        return f'Unsupported source database type: {source_db_type}. Supported types: mysql'
+
+    queries = [
+        ('table_analysis', 'tables', 'Table analysis'),
+        ('column_analysis', 'columns', 'Column analysis'),
+        ('index_analysis', 'indexes', 'Index analysis'),
+        ('foreign_key_analysis', 'foreign_keys', 'Foreign key analysis'),
+        ('database_objects', 'objects', 'Database objects analysis'),
+    ]
+
+    results = {}
+    for query_name, result_key, description in queries:
+        logger.info(f'Executing {description} for {source_db_type} database: {target_database}')
+        query = get_query_resource(query_name, target_database=target_database)
+        results[result_key] = await mysql_run_query(query['sql'])
+
+        if results[result_key] and 'error' in results[result_key][0]:
+            logger.error(f'{description} failed: {results[result_key][0]["error"]}')
+            return f'{description} failed: {results[result_key][0]["error"]}'
+
+    return f"""Schema Analysis Results:
+
+Tables: {results['tables']}
+Columns: {results['columns']}
+Indexes: {results['indexes']}
+Foreign Keys: {results['foreign_keys']}
+Objects: {results['objects']}
+
+Analysis Metadata:
+- Source Database Type: {source_db_type}
+- Target Database: {target_database}"""
 
 
 @app.tool()
