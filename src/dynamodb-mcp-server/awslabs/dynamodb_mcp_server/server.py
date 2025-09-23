@@ -46,7 +46,10 @@ from awslabs.dynamodb_mcp_server.common import (
     handle_exceptions,
     mutation_check,
 )
-from awslabs.dynamodb_mcp_server.database_analysis_queries import get_query_resource
+from awslabs.dynamodb_mcp_server.database_analysis_queries import (
+    get_query_resource,
+    mysql_analysis_queries,
+)
 from awslabs.mysql_mcp_server.server import DBConnectionSingleton
 from awslabs.mysql_mcp_server.server import run_query as mysql_query
 from botocore.config import Config
@@ -276,99 +279,42 @@ async def mysql_run_query(
 
 
 @app.tool()
-async def analyze_access_patterns(
+@handle_exceptions
+async def analyze_source_db(
     source_db_type: str = Field(description="Source Database type: 'mysql'"),
     target_database: str = Field(description='Database name to analyze'),
-    analysis_days: int = Field(default=30, description='Number of days to analyze'),
+    analysis_days: int = Field(default=30, description='Number of days to analyze', ge=1),
+    query_name: str = Field(description='Query name from predefined analysis queries'),
 ) -> str:
-    """Analyze database access patterns and traffic for DynamoDB migration planning."""
+    """Execute predefined SQL queries against the source database for analysis."""
     source_db_type = source_db_type.lower()
     if source_db_type not in ['mysql']:
         return f'Unsupported source database type: {source_db_type}. Supported types: mysql'
 
-    perf_check = get_query_resource('performance_schema_check')
-    perf_result = await mysql_run_query(perf_check['sql'])
-
-    if not perf_result or perf_result[0].get('Value') != 'ON':
-        return """MySQL Performance Schema is disabled
-
-**Performance Schema Setup**:
-1. Open Amazon RDS console → Parameter groups
-2. Select your custom parameter group (create one if needed)
-3. Set the parameters:
-   - performance_schema = 1
-4. Associate parameter group with your DB instance
-5. Reboot required to make this work
-Wait 5-10 minutes for logs to populate, then retry analysis."""
-
-    queries = [
-        ('pattern_analysis', 'patterns', 'Pattern analysis'),
-        ('rps_calculation', 'rps_data', 'RPS analysis'),
-    ]
-
-    results = {}
-    for query_name, result_key, description in queries:
-        logger.info(f'Executing {description} for {source_db_type} database: {target_database}')
+    try:
         query = get_query_resource(
             query_name, target_database=target_database, analysis_days=analysis_days
         )
-        results[result_key] = await mysql_run_query(query['sql'])
+    except ValueError as e:
+        available_queries = list(mysql_analysis_queries.keys())
+        logger.error(f'Invalid query name: {query_name}. Available queries: {available_queries}')
+        return f'Error: {str(e)}. Available queries: {available_queries}'
 
-        if results[result_key] and 'error' in results[result_key][0]:
-            logger.error(f'{description} failed: {results[result_key][0]["error"]}')
-            return f'{description} failed: {results[result_key][0]["error"]}'
+    logger.info(f'Executing {query["name"]} for {source_db_type} database: {target_database}')
 
-    return f"""Access Pattern Analysis Results:
-{results['patterns']}
+    result = await mysql_run_query(query['sql'])
 
-RPS Analysis Results:
-{results['rps_data']}
+    if result and 'error' in result[0]:
+        logger.error(f'{query["name"]} failed: {result[0]["error"]}')
+        return f'{query["name"]} failed: {result[0]["error"]}'
 
-Analysis Metadata:
-- Source Database Type: {source_db_type}
-- Target Database: {target_database}
-- Analysis Days: {analysis_days}"""
+    return f"""Query Analysis Results:
 
+{query['name']}: {query['description']}
 
-@app.tool()
-async def analyze_schema(
-    source_db_type: str = Field(description="Source Database type: 'mysql'"),
-    target_database: str = Field(description='Database name to analyze'),
-) -> str:
-    """Analyze database schema structure for DynamoDB migration planning."""
-    source_db_type = source_db_type.lower()
-    if source_db_type not in ['mysql']:
-        return f'Unsupported source database type: {source_db_type}. Supported types: mysql'
+Results: {result}
 
-    queries = [
-        ('table_analysis', 'tables', 'Table analysis'),
-        ('column_analysis', 'columns', 'Column analysis'),
-        ('index_analysis', 'indexes', 'Index analysis'),
-        ('foreign_key_analysis', 'foreign_keys', 'Foreign key analysis'),
-        ('database_objects', 'objects', 'Database objects analysis'),
-    ]
-
-    results = {}
-    for query_name, result_key, description in queries:
-        logger.info(f'Executing {description} for {source_db_type} database: {target_database}')
-        query = get_query_resource(query_name, target_database=target_database)
-        results[result_key] = await mysql_run_query(query['sql'])
-
-        if results[result_key] and 'error' in results[result_key][0]:
-            logger.error(f'{description} failed: {results[result_key][0]["error"]}')
-            return f'{description} failed: {results[result_key][0]["error"]}'
-
-    return f"""Schema Analysis Results:
-
-Tables: {results['tables']}
-Columns: {results['columns']}
-Indexes: {results['indexes']}
-Foreign Keys: {results['foreign_keys']}
-Objects: {results['objects']}
-
-Analysis Metadata:
-- Source Database Type: {source_db_type}
-- Target Database: {target_database}"""
+Analysis Period: {analysis_days} days | Database: {target_database}"""
 
 
 @app.tool()

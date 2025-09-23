@@ -1,4 +1,9 @@
-"""Tests package - sets up import path for local modules."""
+"""Tests package - sets up import path for local modules.
+
+This configures Python's import path so pytest can import awslabs.dynamodb_mcp_server
+modules during development testing before the package is installed.
+Without this, test imports would fail with ModuleNotFoundError.
+"""
 
 import sys
 import os

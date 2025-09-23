@@ -12,28 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MySQL Analysis SQL Query Resources for DynamoDB Migration."""
+"""Source Database Analysis SQL Query Resources for DynamoDB Data Modeling."""
 
 from typing import Any, Dict
 
 
-# SQL Query Templates as Resources
+# SQL Query Templates for MySQL
 mysql_analysis_queries = {
     'database_identification': {
         'name': 'Database Identification',
-        'description': 'Identifies the currently configured database',
+        'description': 'Identifies the currently configured database connection to confirm which database will be analyzed',
         'sql': 'SELECT DATABASE() as configured_database;',
         'parameters': [],
     },
     'performance_schema_check': {
         'name': 'Performance Schema Status Check',
-        'description': 'Verifies if Performance Schema is enabled for analysis',
+        'description': 'Verifies if MySQL Performance Schema is enabled, which is required for query pattern analysis and RPS calculations',
         'sql': "SHOW VARIABLES LIKE 'performance_schema';",
         'parameters': [],
     },
     'pattern_analysis': {
         'name': 'Query Pattern Analysis',
-        'description': 'Analyzes query patterns from Performance Schema with RPS calculation',
+        'description': 'Analyzes normalized query patterns from Performance Schema over specified time period, calculating RPS, execution times, scan patterns, and complexity classification for DynamoDB Data Modeling',
         'sql': """SELECT
   DIGEST_TEXT as query_pattern,
   COUNT_STAR as frequency,
@@ -83,7 +83,7 @@ ORDER BY frequency DESC;""",
     },
     'table_analysis': {
         'name': 'Table Structure Analysis',
-        'description': 'Analyzes table sizes, row counts, and basic structure',
+        'description': 'Analyzes table sizes, row counts, data/index storage usage, column counts, and foreign key relationships to understand database structure and identify largest tables',
         'sql': """SELECT
   TABLE_NAME,
   TABLE_ROWS,
@@ -100,7 +100,7 @@ ORDER BY TABLE_ROWS DESC;""",
     },
     'column_analysis': {
         'name': 'Column Information Analysis',
-        'description': 'Detailed column structure and data types',
+        'description': 'Detailed analysis of column structures, data types, nullability, keys, and defaults to understand attribute patterns and identify potential DynamoDB attribute mappings and data type conversions',
         'sql': """SELECT
   TABLE_NAME,
   COLUMN_NAME,
@@ -116,7 +116,7 @@ ORDER BY TABLE_NAME, ORDINAL_POSITION;""",
     },
     'index_analysis': {
         'name': 'Index Statistics Analysis',
-        'description': 'Index structure and composition analysis',
+        'description': 'Analyzes index structures, compositions, and uniqueness constraints to identify access patterns and determine optimal DynamoDB key design and Global Secondary Index requirements',
         'sql': """SELECT
   TABLE_NAME,
   INDEX_NAME,
@@ -130,7 +130,7 @@ ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX;""",
     },
     'foreign_key_analysis': {
         'name': 'Foreign Key Relationship Analysis',
-        'description': 'Foreign key constraints and relationship cardinality',
+        'description': 'Analyzes foreign key constraints, referential integrity rules, and relationship cardinalities to understand entity relationships and design appropriate DynamoDB item collections and access patterns',
         'sql': """SELECT
   kcu.CONSTRAINT_NAME,
   kcu.TABLE_NAME as child_table,
@@ -160,7 +160,7 @@ ORDER BY kcu.TABLE_NAME, kcu.COLUMN_NAME;""",
     },
     'database_objects': {
         'name': 'Database Objects Summary',
-        'description': 'Summary of triggers, procedures, and functions',
+        'description': 'Comprehensive inventory of database objects including tables, triggers, stored procedures, and functions to identify complexity and potential application logic that needs to be redesigned for DynamoDB',
         'sql': """SELECT
   'Tables' as object_type,
   COUNT(*) as count,
@@ -194,7 +194,7 @@ AND ROUTINE_TYPE = 'FUNCTION';""",
     },
     'rps_calculation': {
         'name': 'RPS and Traffic Analysis',
-        'description': 'Overall RPS calculation and traffic patterns',
+        'description': 'Calculates requests per second (RPS) and analyzes traffic patterns by date/hour, read/write ratios, and query distribution to determine DynamoDB capacity requirements and identify peak usage periods for scaling planning',
         'sql': """SELECT
   DATE(LAST_SEEN) as analysis_date,
   HOUR(LAST_SEEN) as analysis_hour,

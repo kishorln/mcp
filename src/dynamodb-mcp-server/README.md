@@ -2,16 +2,15 @@
 
 The official MCP Server for interacting with AWS DynamoDB
 
-This comprehensive server provides both operational DynamoDB management and expert design guidance, featuring 30+ operational tools for managing DynamoDB tables, items, indexes, backups, and more, expert data modeling guidance and also MySQL query capabilities for database analysis and migration planning.
+This comprehensive server provides both operational DynamoDB management and expert design guidance, featuring 30+ operational tools for managing DynamoDB tables, items, indexes, backups, and more, expert data modeling guidance and also MySQL query capabilities for source database analysis to design DynamoDB Data Modeling.
 
 ## Available MCP Tools
 
 ### Design & Modeling
 - `dynamodb_data_modeling` - Retrieves the complete DynamoDB Data Modeling Expert prompt
 
-### Source Database Analysis for Migration Planning
-- `analyze_access_patterns` - Analyze database access patterns and traffic for DynamoDB migration planning
-- `analyze_schema` - Analyze database schema structure for DynamoDB migration planning
+### Source Database Analysis for DynamoDB Data Modeling
+- `analyze_source_db` - Execute predefined SQL queries against source database for comprehensive analysis
 
 ### Table Operations
 - `create_table` - Creates a new DynamoDB table with optional secondary indexes
@@ -67,7 +66,7 @@ All tools support an optional `region_name` parameter to specify which AWS regio
 
 ## Source Database Integration
 
-The DynamoDB MCP server includes source database integration for database analysis and migration planning.
+The DynamoDB MCP server includes source database integration for database analysis and design DynamoDB Data Modeling.
 Currently supports Aurora MySQL with additional database support planned for future releases.
 
 ### MySQL Environment Variables
@@ -88,37 +87,13 @@ Currently supports Aurora MySQL with additional database support planned for fut
 
 Add these environment variables to DynamoDB MCP Server configuration to enable MySQL integration:
 
-- `MYSQL_CLUSTER_ARN`: RDS / Aurora MySQL cluster ARN
+- `MYSQL_CLUSTER_ARN`: Aurora MySQL cluster ARN
 - `MYSQL_SECRET_ARN`: AWS Secrets Manager secret ARN with database credentials
 - `MYSQL_DATABASE`: Database name to connect to
 - `MYSQL_AWS_REGION`: AWS region for MySQL cluster (optional, defaults to AWS_REGION)
 - `MYSQL_READONLY`: optional (default: "true")
 
-**Note**: MySQL source database connection is established only when you set these environment variables in config and enables you to run the migration analysis tools such as `analyze_access_patterns` and `analyze_schema`.
-
-## Source-DB to DynamoDB Data Modeling Workflow
-
-To design a DynamoDB data model based on your existing MySQL database, follow this workflow using the analysis tools:
-
-### 1. Analyze MySQL Access Patterns
-```
-Analyze access patterns for my MySQL database "employees" over the last 30 days
-```
-This analyzes query patterns, RPS, and identifies hot access patterns from MySQL Performance Schema.
-
-### 2. Analyze MySQL Schema Structure
-```
-Analyze the schema structure of my MySQL database "employees"
-```
-This examines table structures, relationships, indexes, and data distribution.
-
-### 3. Design DynamoDB Schema
-```
-Help me design a DynamoDB data model using the analysis results
-```
-This invoke the DynamoDB data modeling tool to design your schema using the analysis from step 1 and 2.
-
-**Note**: Execute these steps manually in sequence for complete data modeling analysis.
+**Note**: MySQL source database connection is established only when you set these environment variables in config and enables you to run the analysis tool `analyze_source_db`.
 
 ## Prerequisites
 
