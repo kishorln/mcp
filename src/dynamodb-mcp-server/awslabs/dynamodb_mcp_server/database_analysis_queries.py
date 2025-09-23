@@ -14,6 +14,7 @@
 
 """Source Database Analysis SQL Query Resources for DynamoDB Data Modeling."""
 
+import os
 from typing import Any, Dict
 
 
@@ -241,5 +242,19 @@ def get_query_resource(query_name: str, **params) -> Dict[str, Any]:
     # Substitute parameters in SQL
     if params:
         query_info['sql'] = query_info['sql'].format(**params)
+
+    # Add configurable LIMIT to prevent context overflow
+    max_results = int(os.getenv('MYSQL_MAX_QUERY_RESULTS', '500'))
+    limit_queries = [
+        'pattern_analysis',
+        'column_analysis',
+        'index_analysis',
+        'foreign_key_analysis',
+    ]
+
+    if query_name in limit_queries and not query_info['sql'].upper().endswith(';'):
+        query_info['sql'] += f' LIMIT {max_results};'
+    elif query_name in limit_queries and query_info['sql'].upper().endswith(';'):
+        query_info['sql'] = query_info['sql'][:-1] + f' LIMIT {max_results};'
 
     return query_info

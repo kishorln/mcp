@@ -67,7 +67,7 @@ This server provides comprehensive DynamoDB capabilities with over 30 operationa
 items, indexes, backups, and more, plus expert data modeling guidance through DynamoDB data modeling expert prompt.
 
 MySQL Integration: This server also includes MySQL query capabilities through the run_query tool, enabling database
-analysis and migration planning from MySQL to DynamoDB.
+analysis for DynamoDB DynamoDB Data Modeling.
 
 IMPORTANT: DynamoDB Attribute Value Format
 -----------------------------------------

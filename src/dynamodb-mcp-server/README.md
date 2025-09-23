@@ -69,8 +69,6 @@ All tools support an optional `region_name` parameter to specify which AWS regio
 The DynamoDB MCP server includes source database integration for database analysis and design DynamoDB Data Modeling.
 Currently supports Aurora MySQL with additional database support planned for future releases.
 
-### MySQL Environment Variables
-
 **Prerequisites for MySQL Integration:**
 1. Aurora MySQL Cluster with MySQL username and password stored in AWS Secrets Manager
 2. Enable RDS Data API for your Aurora MySQL Cluster
@@ -85,6 +83,10 @@ Currently supports Aurora MySQL with additional database support planned for fut
    - Configure AWS credentials with `aws configure` or environment variables
    - AWS profile with permissions to access RDS Data API and AWS Secrets Manager
 
+Recommendation: Run this database analysis tool 'analyze_source_db' in a non-production environment with replicated traffic patterns to ensure accurate results while protecting production systems and sensitive data.
+
+### MySQL Environment Variables
+
 Add these environment variables to DynamoDB MCP Server configuration to enable MySQL integration:
 
 - `MYSQL_CLUSTER_ARN`: Aurora MySQL cluster ARN
@@ -92,6 +94,7 @@ Add these environment variables to DynamoDB MCP Server configuration to enable M
 - `MYSQL_DATABASE`: Database name to connect to
 - `MYSQL_AWS_REGION`: AWS region for MySQL cluster (optional, defaults to AWS_REGION)
 - `MYSQL_READONLY`: optional (default: "true")
+- `MYSQL_MAX_QUERY_RESULTS`: Maximum number of rows returned per analysis query (optional, default: "500")
 
 **Note**: MySQL source database connection is established only when you set these environment variables in config and enables you to run the analysis tool `analyze_source_db`.
 
