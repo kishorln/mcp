@@ -216,6 +216,29 @@ async def dynamodb_data_modeling() -> str:
     return architect_prompt
 
 
+@app.tool()
+@handle_exceptions
+async def source_db_analyzer() -> str:
+    """Retrieves the complete Source Database Analyzer prompt for DynamoDB migration.
+
+    This tool returns a production-ready prompt to help analyze existing databases for
+    DynamoDB migration planning. The prompt provides:
+
+    - Step-by-step database analysis workflow
+    - Support for MySQL with extensibility for other database types
+    - Comprehensive schema and access pattern discovery
+    - Performance analysis and RPS calculations
+    - Integration with DynamoDB data modeling workflow
+
+    Usage: Call this tool to get the source database analysis workflow prompt.
+
+    Returns: Complete source database analyzer prompt as text (no parameters required)
+    """
+    prompt_file = Path(__file__).parent / 'prompts' / 'source_db_analyzer.md'
+    analyzer_prompt = prompt_file.read_text(encoding='utf-8')
+    return analyzer_prompt
+
+
 async def mysql_run_query(
     sql: Annotated[str, Field(description='The SQL query to run')],
     query_parameters: Annotated[

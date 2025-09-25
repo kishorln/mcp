@@ -247,14 +247,16 @@ def get_query_resource(query_name: str, **params) -> Dict[str, Any]:
     max_results = int(os.getenv('MYSQL_MAX_QUERY_RESULTS', '500'))
     limit_queries = [
         'pattern_analysis',
+        'table_analysis',
         'column_analysis',
         'index_analysis',
         'foreign_key_analysis',
+        'database_objects',
+        'rps_calculation',
     ]
 
-    if query_name in limit_queries and not query_info['sql'].upper().endswith(';'):
-        query_info['sql'] += f' LIMIT {max_results};'
-    elif query_name in limit_queries and query_info['sql'].upper().endswith(';'):
-        query_info['sql'] = query_info['sql'][:-1] + f' LIMIT {max_results};'
+    if query_name in limit_queries:
+        sql = query_info['sql'].rstrip(';')
+        query_info['sql'] = f'{sql} LIMIT {max_results};'
 
     return query_info
