@@ -1,6 +1,9 @@
+import os
 import pytest
 import pytest_asyncio
+from awslabs.dynamodb_mcp_server.database_analyzers import DatabaseAnalyzer, MySQLAnalyzer
 from awslabs.dynamodb_mcp_server.server import (
+    app,
     dynamodb_data_modeling,
     source_db_analyzer,
 )
@@ -9,8 +12,6 @@ from awslabs.dynamodb_mcp_server.server import (
 @pytest_asyncio.fixture
 async def aws_credentials():
     """Mocked AWS Credentials for moto."""
-    import os
-
     os.environ['AWS_DEFAULT_REGION'] = 'us-west-2'
 
 
@@ -36,8 +37,6 @@ async def test_dynamodb_data_modeling():
 @pytest.mark.asyncio
 async def test_dynamodb_data_modeling_mcp_integration():
     """Test the dynamodb_data_modeling tool through MCP client."""
-    from awslabs.dynamodb_mcp_server.server import app
-
     # Verify tool is registered in the MCP server
     tools = await app.list_tools()
     tool_names = [tool.name for tool in tools]
@@ -55,7 +54,7 @@ async def test_dynamodb_data_modeling_mcp_integration():
 
 
 @pytest.mark.asyncio
-async def test_source_db_analyzer_missing_database_param(tmp_path):
+async def test_source_db_analyzer_missing_parameters(tmp_path):
     """Test source_db_analyzer with missing database parameter."""
     result = await source_db_analyzer(
         source_db_type='mysql',
@@ -72,7 +71,7 @@ async def test_source_db_analyzer_missing_database_param(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_source_db_analyzer_empty_string_params(tmp_path):
+async def test_source_db_analyzer_empty_parameters(tmp_path):
     """Test source_db_analyzer with empty string parameters."""
     result = await source_db_analyzer(
         source_db_type='mysql',
@@ -133,7 +132,6 @@ async def test_source_db_analyzer_unsupported_database(tmp_path):
 @pytest.mark.asyncio
 async def test_source_db_analyzer_analysis_exception(tmp_path, monkeypatch):
     """Test source_db_analyzer when analysis raises exception."""
-    from awslabs.dynamodb_mcp_server.database_analyzers import MySQLAnalyzer
 
     # Mock analyze to raise exception
     async def mock_analyze_fail(connection_params):
@@ -157,7 +155,6 @@ async def test_source_db_analyzer_analysis_exception(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_source_db_analyzer_successful_analysis(tmp_path, monkeypatch):
     """Test source_db_analyzer with successful analysis."""
-    from awslabs.dynamodb_mcp_server.database_analyzers import DatabaseAnalyzer, MySQLAnalyzer
 
     # Mock successful analysis
     async def mock_analyze_success(connection_params):
@@ -189,3 +186,26 @@ async def test_source_db_analyzer_successful_analysis(tmp_path, monkeypatch):
     assert 'Saved Files:' in result
     assert 'File Save Errors:' in result
     assert 'Query Errors (1):' in result
+
+
+@pytest.mark.asyncio
+async def test_source_db_analyzer_exception_handling(tmp_path, monkeypatch):
+    """Test exception handling in source_db_analyzer."""
+
+    def mock_analyze(*args, **kwargs):
+        raise Exception('Test exception')
+
+    monkeypatch.setattr(
+        'awslabs.dynamodb_mcp_server.database_analyzers.MySQLAnalyzer.analyze', mock_analyze
+    )
+
+    result = await source_db_analyzer(
+        source_db_type='mysql',
+        database_name='test_db',
+        aws_cluster_arn='test-cluster',
+        aws_secret_arn='test-secret',
+        aws_region='us-east-1',
+        output_dir=str(tmp_path),
+    )
+
+    assert 'Analysis failed: Test exception' in result

@@ -1,7 +1,13 @@
+import json
 import os
 import pytest
 from awslabs.dynamodb_mcp_server.database_analysis_queries import get_query_resource
-from awslabs.dynamodb_mcp_server.database_analyzers import DatabaseAnalyzerRegistry, MySQLAnalyzer
+from awslabs.dynamodb_mcp_server.database_analyzers import (
+    DatabaseAnalyzer,
+    DatabaseAnalyzerRegistry,
+    MySQLAnalyzer,
+)
+from awslabs.dynamodb_mcp_server.server import source_db_analyzer
 from unittest.mock import patch
 
 
@@ -15,7 +21,7 @@ async def test_mysql_analyzer_initialization():
         'region': 'us-east-1',
         'max_results': 500,
         'pattern_analysis_days': 30,
-        'output_dir': '/tmp/test',
+        'output_dir': '/tmp',
     }
 
     analyzer = MySQLAnalyzer(connection_params)
@@ -62,7 +68,7 @@ def test_query_resource_functions():
         get_query_resource('invalid_query', max_query_results=1000)
 
 
-def test_mysql_max_query_results_limit(monkeypatch):
+def test_query_limit_parameter_override(monkeypatch):
     """Test LIMIT clause addition for codecov coverage."""
     # Test parameter override (takes precedence over env var)
     monkeypatch.setenv('MYSQL_MAX_QUERY_RESULTS', '100')
@@ -89,7 +95,7 @@ def test_mysql_max_query_results_limit(monkeypatch):
     assert 'LIMIT 1000' in query['sql']  # Uses the provided value
 
 
-def test_mysql_performance_schema_check():
+def test_performance_schema_detection():
     """Test MySQL performance schema detection."""
     # Test enabled case
     result_enabled = [{'': '1'}]  # MySQL returns empty string as key
@@ -107,8 +113,6 @@ def test_mysql_performance_schema_check():
 @pytest.mark.asyncio
 async def test_source_db_analyzer_integration(tmp_path):
     """Test source_db_analyzer tool integration."""
-    from awslabs.dynamodb_mcp_server.server import source_db_analyzer
-
     # Test with missing required parameters (database_name is None)
     result = await source_db_analyzer(
         source_db_type='mysql',
@@ -123,10 +127,8 @@ async def test_source_db_analyzer_integration(tmp_path):
     assert 'To analyze your mysql database, I need:' in result
 
 
-def test_database_analyzer_build_connection_params_invalid_dir():
+def test_build_connection_params_invalid_directory():
     """Test build_connection_params with invalid output directory."""
-    from awslabs.dynamodb_mcp_server.database_analyzers import DatabaseAnalyzer
-
     # Test non-absolute path
     with pytest.raises(ValueError, match='Output directory must be an absolute path'):
         DatabaseAnalyzer.build_connection_params('mysql', output_dir='relative/path')
@@ -136,10 +138,8 @@ def test_database_analyzer_build_connection_params_invalid_dir():
         DatabaseAnalyzer.build_connection_params('mysql', output_dir='/nonexistent/path')
 
 
-def test_database_analyzer_save_analysis_files_empty():
+def test_save_analysis_files_empty_results():
     """Test save_analysis_files with empty results."""
-    from awslabs.dynamodb_mcp_server.database_analyzers import DatabaseAnalyzer
-
     saved_files, save_errors = DatabaseAnalyzer.save_analysis_files(
         {}, 'mysql', 'test_db', 30, 500, '/tmp'
     )
@@ -151,8 +151,6 @@ def test_database_analyzer_save_analysis_files_empty():
 @pytest.mark.asyncio
 async def test_mysql_analyzer_query_execution():
     """Test MySQL analyzer query execution."""
-    from awslabs.dynamodb_mcp_server.database_analyzers import MySQLAnalyzer
-
     connection_params = {
         'cluster_arn': 'test-cluster',
         'secret_arn': 'test-secret',
@@ -172,11 +170,8 @@ async def test_mysql_analyzer_query_execution():
     assert 'error' in result[0]
 
 
-def test_database_analyzer_save_analysis_files_with_data(tmp_path, monkeypatch):
+def test_save_analysis_files_with_data(tmp_path, monkeypatch):
     """Test save_analysis_files with actual data."""
-    import json
-    from awslabs.dynamodb_mcp_server.database_analyzers import DatabaseAnalyzer
-
     # Mock datetime to control timestamp
 
     class MockDateTime:
@@ -218,9 +213,8 @@ def test_database_analyzer_save_analysis_files_with_data(tmp_path, monkeypatch):
             assert data['database'] == 'test_db'
 
 
-def test_database_analyzer_save_files_creation_error(tmp_path, monkeypatch):
+def test_save_analysis_files_creation_error(tmp_path, monkeypatch):
     """Test save_analysis_files when folder creation fails."""
-    from awslabs.dynamodb_mcp_server.database_analyzers import DatabaseAnalyzer
 
     # Mock os.makedirs to raise exception
     def mock_makedirs_fail(*args, **kwargs):
@@ -239,10 +233,8 @@ def test_database_analyzer_save_files_creation_error(tmp_path, monkeypatch):
     assert 'Failed to create folder' in save_errors[0]
 
 
-def test_database_analyzer_filter_pattern_data():
+def test_filter_pattern_data_calculation():
     """Test filter_pattern_data method."""
-    from awslabs.dynamodb_mcp_server.database_analyzers import DatabaseAnalyzer
-
     # Test with valid data
     pattern_data = [
         {'DIGEST_TEXT': 'SELECT * FROM users', 'COUNT_STAR': 10},
@@ -264,8 +256,6 @@ def test_database_analyzer_filter_pattern_data():
 @pytest.mark.asyncio
 async def test_mysql_analyzer_execute_query_batch():
     """Test MySQL analyzer batch query execution."""
-    from awslabs.dynamodb_mcp_server.database_analyzers import MySQLAnalyzer
-
     connection_params = {
         'cluster_arn': 'test-cluster',
         'secret_arn': 'test-secret',
@@ -287,14 +277,8 @@ async def test_mysql_analyzer_execute_query_batch():
     assert 'test_query' in errors[0]
 
 
-def test_get_analyzer_with_invalid_database_type():
-    """Test error handling when an unsupported database type is provided."""
-    with pytest.raises(ValueError, match='Unsupported database type: invalid'):
-        DatabaseAnalyzerRegistry.get_analyzer('invalid')
-
-
 @pytest.mark.asyncio
-async def test_mysql_query_execution_handles_database_exceptions():
+async def test_query_execution_handles_database_exceptions(monkeypatch):
     """Test MySQL query execution properly handles and reports database connection failures."""
     analyzer = MySQLAnalyzer(
         {
@@ -308,12 +292,15 @@ async def test_mysql_query_execution_handles_database_exceptions():
         }
     )
 
-    with patch(
-        'awslabs.dynamodb_mcp_server.database_analyzers.mysql_query',
-        side_effect=Exception('DB Error'),
-    ):
-        result = await analyzer._run_query('SELECT 1')
-        assert result[0]['error'] == 'MySQL query failed: DB Error'
+    def mock_mysql_query(*args, **kwargs):
+        raise Exception('DB Error')
+
+    monkeypatch.setattr(
+        'awslabs.dynamodb_mcp_server.database_analyzers.mysql_query', mock_mysql_query
+    )
+
+    result = await analyzer._run_query('SELECT 1')
+    assert result[0]['error'] == 'MySQL query failed: DB Error'
 
 
 @pytest.mark.asyncio
@@ -337,7 +324,7 @@ async def test_execute_query_batch_handles_empty_result_sets():
 
 
 @pytest.mark.asyncio
-async def test_execute_query_batch_handles_query_failures():
+async def test_execute_query_batch_handles_query_failures(monkeypatch):
     """Test batch query execution properly handles individual query failures."""
     analyzer = MySQLAnalyzer(
         {
@@ -351,10 +338,13 @@ async def test_execute_query_batch_handles_query_failures():
         }
     )
 
-    with patch.object(analyzer, '_run_query', side_effect=Exception('Query failed')):
-        results, errors = await analyzer.execute_query_batch(['table_analysis'])
-        assert len(errors) > 0
-        assert 'Query failed' in errors[0]
+    def mock_run_query(*args):
+        raise Exception('Query failed')
+
+    monkeypatch.setattr(analyzer, '_run_query', mock_run_query)
+    results, errors = await analyzer.execute_query_batch(['table_analysis'])
+    assert len(errors) > 0
+    assert 'Query failed' in errors[0]
 
 
 @pytest.mark.asyncio
@@ -391,3 +381,100 @@ async def test_performance_schema_disabled_workflow():
     # Test with empty result
     assert not MySQLAnalyzer.is_performance_schema_enabled([])
     assert not MySQLAnalyzer.is_performance_schema_enabled(None)
+
+
+def test_validate_connection_params_mysql():
+    """Test MySQL connection parameter validation."""
+    params = {'cluster_arn': 'test'}
+    missing, descriptions = DatabaseAnalyzer.validate_connection_params('mysql', params)
+    assert 'secret_arn' in missing
+    assert 'database' in missing
+    assert 'region' in missing
+    assert descriptions['cluster_arn'] == 'AWS cluster ARN'
+
+
+def test_save_analysis_files_json_error(tmp_path, monkeypatch):
+    """Test save_analysis_files with JSON serialization error."""
+    results = {'test': {'description': 'Test', 'data': []}}
+
+    monkeypatch.setattr(
+        'json.dump', lambda *args, **kwargs: (_ for _ in ()).throw(TypeError('Not serializable'))
+    )
+    saved, errors = DatabaseAnalyzer.save_analysis_files(
+        results, 'mysql', 'db', 30, 500, str(tmp_path)
+    )
+    assert len(errors) == 1
+    assert 'Failed to save test' in errors[0]
+
+
+@pytest.mark.asyncio
+async def test_execute_query_batch_pattern_analysis():
+    """Test batch execution with pattern analysis days parameter."""
+    analyzer = MySQLAnalyzer(
+        {
+            'cluster_arn': 'test',
+            'secret_arn': 'test',
+            'database': 'test',
+            'region': 'us-east-1',
+            'max_results': 500,
+            'pattern_analysis_days': 30,
+            'output_dir': '/tmp',
+        }
+    )
+
+    with patch.object(analyzer, '_run_query', return_value=[{'result': 'data'}]):
+        results, errors = await analyzer.execute_query_batch(['query_pattern_analysis'], 30)
+        assert 'query_pattern_analysis' in results
+
+
+@pytest.mark.asyncio
+async def test_analyze_performance_disabled():
+    """Test analyze with performance schema disabled."""
+    connection_params = {
+        'cluster_arn': 'test',
+        'secret_arn': 'test',
+        'database': 'test',
+        'region': 'us-east-1',
+        'max_results': 500,
+        'pattern_analysis_days': 30,
+        'output_dir': '/tmp',
+    }
+
+    def mock_execute_query_batch(query_names, pattern_analysis_days=None):
+        if 'performance_schema_check' in query_names:
+            return (
+                {'performance_schema_check': {'description': 'Check', 'data': [{'': '0'}]}},
+                [],
+            )
+        return ({'table_analysis': {'description': 'Tables', 'data': []}}, [])
+
+    with patch.object(MySQLAnalyzer, 'execute_query_batch', side_effect=mock_execute_query_batch):
+        result = await MySQLAnalyzer.analyze(connection_params)
+        assert not result['performance_enabled']
+        assert 'Performance Schema disabled - skipping query_pattern_analysis' in result['errors']
+
+
+@pytest.mark.asyncio
+async def test_analyze_performance_enabled():
+    """Test analyze with performance schema enabled."""
+    connection_params = {
+        'cluster_arn': 'test',
+        'secret_arn': 'test',
+        'database': 'test',
+        'region': 'us-east-1',
+        'max_results': 500,
+        'pattern_analysis_days': 30,
+        'output_dir': '/tmp',
+    }
+
+    with patch.object(
+        MySQLAnalyzer,
+        'execute_query_batch',
+        side_effect=[
+            ({'table_analysis': {'description': 'Tables', 'data': []}}, []),
+            ({'performance_schema_check': {'description': 'Check', 'data': [{'': '1'}]}}, []),
+            ({'query_pattern_analysis': {'description': 'Patterns', 'data': []}}, []),
+        ],
+    ):
+        result = await MySQLAnalyzer.analyze(connection_params)
+        assert result['performance_enabled']
