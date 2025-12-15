@@ -71,30 +71,21 @@ class DatabaseAnalyzer:
             port_value = kwargs.get('port') or os.getenv('MYSQL_PORT', str(DEFAULT_MYSQL_PORT))
             port = int(port_value) if str(port_value).isdigit() else DEFAULT_MYSQL_PORT
 
-            # Determine connection method - explicit parameters override environment variables
-            explicit_cluster_arn = kwargs.get('aws_cluster_arn')
-            explicit_hostname = kwargs.get('hostname')
-            if explicit_cluster_arn:
-                cluster_arn = explicit_cluster_arn
-                hostname = None
-            elif explicit_hostname:
-                cluster_arn = None
-                hostname = explicit_hostname
-            else:
-                # Fall back to environment variables
-                env_cluster_arn = os.getenv('MYSQL_CLUSTER_ARN')
-                env_hostname = os.getenv('MYSQL_HOSTNAME')
+            # Determine connection method
+            # Priority: explicit args > env vars, and cluster_arn > hostname within each level
+            cluster_arn = kwargs.get('aws_cluster_arn')
+            hostname = kwargs.get('hostname')
 
-                # Apply same exclusion to env vars as above
-                if env_cluster_arn:
-                    cluster_arn = env_cluster_arn
-                    hostname = None
-                elif env_hostname:
-                    cluster_arn = None
-                    hostname = env_hostname
-                else:
-                    cluster_arn = None
-                    hostname = None
+            if cluster_arn:
+                # Explicit cluster_arn - use RDS Data API-based access
+                hostname = None
+            elif hostname:
+                # Explicit hostname - use connection-based access
+                cluster_arn = None
+            else:
+                # Fall back to env vars with same precedence
+                cluster_arn = os.getenv('MYSQL_CLUSTER_ARN')
+                hostname = os.getenv('MYSQL_HOSTNAME') if not cluster_arn else None
 
             return {
                 'cluster_arn': cluster_arn,
@@ -131,15 +122,16 @@ class DatabaseAnalyzer:
             cluster_arn = connection_params.get('cluster_arn')
             hostname = connection_params.get('hostname')
 
-            # Check for either RDS Data API or direct connection parameters
+            # Check for either RDS Data API-based or connection-based access
             has_rds_data_api = bool(isinstance(cluster_arn, str) and cluster_arn.strip())
-            has_direct_connection = bool(isinstance(hostname, str) and hostname.strip())
+            has_connection_based = bool(isinstance(hostname, str) and hostname.strip())
 
             # Check that we have a connection method
-            if not has_rds_data_api and not has_direct_connection:
+            if not has_rds_data_api and not has_connection_based:
                 missing_params.append('cluster_arn OR hostname')
                 param_descriptions['cluster_arn OR hostname'] = (
-                    'Required: Either aws_cluster_arn (Aurora MySQL cluster ARN for RDS Data API) OR hostname (MySQL server hostname for direct connection)'
+                    'Required: Either aws_cluster_arn (for RDS Data API-based access) '
+                    'OR hostname (for connection-based access)'
                 )
 
             # Check common required parameters
@@ -303,7 +295,7 @@ class MySQLAnalyzer(DatabaseAnalyzer):
         try:
             # Create appropriate connection type based on available parameters
             if self.cluster_arn:
-                # Use RDS Data API connection
+                # RDS Data API-based access
                 db_connection = RDSDataAPIConnection(
                     cluster_arn=self.cluster_arn,
                     secret_arn=self.secret_arn,
@@ -312,7 +304,7 @@ class MySQLAnalyzer(DatabaseAnalyzer):
                     readonly=DEFAULT_READONLY,
                 )
             else:
-                # Use direct asyncmy connection
+                # Connection-based access
                 db_connection = AsyncmyPoolConnection(
                     hostname=self.hostname,
                     port=self.port,

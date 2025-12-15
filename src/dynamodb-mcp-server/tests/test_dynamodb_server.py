@@ -91,7 +91,7 @@ async def test_source_db_analyzer_empty_parameters(tmp_path):
     )
 
     assert (
-        'Missing required parameters: Required: Either aws_cluster_arn (Aurora MySQL cluster ARN for RDS Data API) OR hostname (MySQL server hostname for direct connection)'
+        'Missing required parameters: Required: Either aws_cluster_arn (for RDS Data API-based access) OR hostname (for connection-based access)'
         in result
     )
 
@@ -135,7 +135,7 @@ async def test_source_db_analyzer_connection_method_precedence(mysql_env_setup, 
         output_dir=str(tmp_path),
     )
 
-    # The test validates the precedence works: it used Asyncmy Direct connection (hostname)
+    # The test validates the precedence works: it used Asyncmy connection-based access (hostname)
     # instead of RDS Data API (cluster_arn), even though env had MYSQL_CLUSTER_ARN
     assert 'Database Analysis Failed' in result
 

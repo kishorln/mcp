@@ -14,7 +14,7 @@ The DynamoDB MCP server provides four tools for data modeling and validation:
 
   **Example invocation:** "Validate my DynamoDB data model"
 
-- `source_db_analyzer` - Analyzes existing MySQL/Aurora databases to extract schema structure, access patterns from Performance Schema, and generates timestamped analysis files for use with dynamodb_data_modeling. Supports both AWS RDS Data API (Aurora MySQL) and direct connections (RDS/self-hosted MySQL).
+- `source_db_analyzer` - Analyzes existing MySQL databases to extract schema structure, access patterns from Performance Schema, and generates timestamped analysis files for use with dynamodb_data_modeling. Supports both RDS Data API-based access and connection-based access.
 
   **Example invocation:** "Analyze my MySQL database and help me design a DynamoDB data model"
 
@@ -159,23 +159,23 @@ The tool automates the traditional manual validation process:
 
 ### Source Database Analysis
 
-The `source_db_analyzer` tool analyzes existing MySQL/Aurora databases to extract schema and access patterns for DynamoDB modeling. This is useful when migrating from relational databases.
+The `source_db_analyzer` tool analyzes existing MySQL databases to extract schema and access patterns for DynamoDB modeling. This is useful when migrating from relational databases.
 
 The tool supports two connection methods:
-- **AWS RDS Data API** (Aurora MySQL): Serverless connection using cluster ARN
-- **Direct Connection** (RDS/self-hosted MySQL): Traditional connection using hostname/port
+- **RDS Data API-based access**: Serverless connection using cluster ARN
+- **Connection-based access**: Traditional connection using hostname/port
 
 #### Prerequisites for MySQL Integration
 
-**For AWS RDS Data API (Aurora MySQL):**
-1. Aurora MySQL Cluster with credentials stored in AWS Secrets Manager
-2. Enable RDS Data API for your Aurora MySQL Cluster
-3. AWS credentials with permissions to access RDS Data API and AWS Secrets Manager
-
-**For Direct Connection (RDS/self-hosted MySQL):**
-1. MySQL server (RDS, Aurora, or self-hosted) accessible from your environment
+**For RDS Data API-based access:**
+1. MySQL cluster with RDS Data API enabled
 2. Database credentials stored in AWS Secrets Manager
-3. AWS credentials with permissions to access AWS Secrets Manager
+3. AWS credentials with permissions to access RDS Data API and Secrets Manager
+
+**For Connection-based access:**
+1. MySQL server accessible from your environment
+2. Database credentials stored in AWS Secrets Manager
+3. AWS credentials with permissions to access Secrets Manager
 
 **For both connection methods:**
 4. Enable Performance Schema for access pattern analysis (optional but recommended):
@@ -191,13 +191,13 @@ The tool supports two connection methods:
 
 Add these environment variables to enable MySQL integration:
 
-**For AWS RDS Data API (Aurora MySQL):**
-- `MYSQL_CLUSTER_ARN`: Aurora MySQL cluster Resource ARN
+**For RDS Data API-based access:**
+- `MYSQL_CLUSTER_ARN`: MySQL cluster ARN
 - `MYSQL_SECRET_ARN`: ARN of secret containing database credentials
 - `MYSQL_DATABASE`: Database name to analyze
-- `AWS_REGION`: AWS region of the Aurora MySQL cluster
+- `AWS_REGION`: AWS region of the cluster
 
-**For Direct Connection (RDS/self-hosted MySQL):**
+**For Connection-based access:**
 - `MYSQL_HOSTNAME`: MySQL server hostname or endpoint
 - `MYSQL_PORT`: MySQL server port (optional, default: 3306)
 - `MYSQL_SECRET_ARN`: ARN of secret containing database credentials

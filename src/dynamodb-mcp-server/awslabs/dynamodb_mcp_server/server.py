@@ -47,7 +47,7 @@ Use the `dynamodb_data_modeling` tool to access enterprise-level DynamoDB design
 This tool provides systematic methodology for creating multi-table design with
 advanced optimizations, cost analysis, and integration patterns.
 
-Use the `source_db_analyzer` tool to analyze existing MySQL/Aurora databases for DynamoDB Data Modeling:
+Use the `source_db_analyzer` tool to analyze existing MySQL databases for DynamoDB Data Modeling:
 - Extracts schema structure (tables, columns, indexes, foreign keys)
 - Captures access patterns from Performance Schema (query patterns, RPS, frequencies)
 - Generates timestamped analysis files (JSON format) for use with dynamodb_data_modeling
@@ -125,15 +125,15 @@ async def source_db_analyzer(
     ),
     aws_cluster_arn: Optional[str] = Field(
         default=None,
-        description='AWS cluster ARN for RDS Data API connection (overrides MYSQL_CLUSTER_ARN env var)',
+        description='AWS cluster ARN for RDS Data API-based access (overrides MYSQL_CLUSTER_ARN env var)',
     ),
     hostname: Optional[str] = Field(
         default=None,
-        description='Database hostname for direct connection (overrides MYSQL_HOSTNAME env var)',
+        description='Database hostname for connection-based access (overrides MYSQL_HOSTNAME env var)',
     ),
     port: Optional[int] = Field(
         default=None,
-        description='Database port for direct connection (overrides MYSQL_PORT env var, default: 3306)',
+        description='Database port for connection-based access (overrides MYSQL_PORT env var, default: 3306)',
     ),
     aws_secret_arn: Optional[str] = Field(
         default=None, description='AWS secret ARN (overrides MYSQL_SECRET_ARN env var)'
@@ -158,12 +158,12 @@ async def source_db_analyzer(
     - Files for skipped queries explain why they were skipped (e.g., Performance Schema disabled)
     - Use these analysis files with the dynamodb_data_modeling tool to design your DynamoDB schema
 
-    Connection Requirements (MySQL/Aurora):
+    Connection Requirements (MySQL):
     Two connection methods are supported:
-    1. RDS Data API (Aurora MySQL): Requires aws_cluster_arn
-    2. Direct Connection (Aurora/RDS/self-hosted MySQL): Requires hostname and port
+    1. RDS Data API-based access: Requires aws_cluster_arn
+    2. Connection-based access: Requires hostname and port
 
-    Note: Do not provide both CLUSTER_ARN and HOSTNAME- the tool will automatically use the first available option
+    Note: If both are provided, cluster_arn takes precedence over hostname
 
     Both methods require:
     - Database credentials stored in AWS Secrets Manager
@@ -174,11 +174,11 @@ async def source_db_analyzer(
     Environment Variables (Optional):
     You can set these instead of passing parameters:
     - MYSQL_DATABASE: Database name to analyze
-    - MYSQL_CLUSTER_ARN: Aurora cluster ARN (for RDS Data API)
-    - MYSQL_HOSTNAME: Database hostname (for direct connection)
-    - MYSQL_PORT: Database port (for direct connection, default: 3306)
+    - MYSQL_CLUSTER_ARN: Cluster ARN (for RDS Data API-based access)
+    - MYSQL_HOSTNAME: Database hostname (for connection-based access)
+    - MYSQL_PORT: Database port (for connection-based access, default: 3306)
     - MYSQL_SECRET_ARN: Secrets Manager secret ARN containing DB credentials
-    - AWS_REGION: AWS region where your database instance and Secrets Manager are located
+    - AWS_REGION: AWS region where your database and Secrets Manager are located
     - MYSQL_MAX_QUERY_RESULTS: Maximum rows per query (default: 500)
 
     Typical Usage:

@@ -476,7 +476,12 @@ async def test_analyze_performance_disabled():
     def mock_execute_query_batch(query_names):
         if 'performance_schema_check' in query_names:
             return (
-                {'performance_schema_check': {'description': 'Check', 'data': [{'': '0'}]}},
+                {
+                    'performance_schema_check': {
+                        'description': 'Check',
+                        'data': [{'@@performance_schema': '0'}],
+                    }
+                },
                 [],
             )
         return ({'comprehensive_table_analysis': {'description': 'Tables', 'data': []}}, [])
